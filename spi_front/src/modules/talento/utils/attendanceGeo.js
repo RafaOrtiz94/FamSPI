@@ -56,7 +56,7 @@ export const calculateBounds = (coordinates = []) => {
   };
 };
 
-const JITTER_RADIUS = 0.00015;
+const JITTER_RADIUS = 0.000008;
 
 export const applyJitter = (coord, index, total) => {
   if (!isValidCoordinate(coord)) {
@@ -66,7 +66,7 @@ export const applyJitter = (coord, index, total) => {
     return coord;
   }
   const angle = (index / total) * Math.PI * 2;
-  const jitterFactor = JITTER_RADIUS * Math.sqrt(index + 1);
+  const jitterFactor = JITTER_RADIUS;
   return {
     lat: coord.lat + Math.sin(angle) * jitterFactor,
     lng: coord.lng + Math.cos(angle) * jitterFactor,
@@ -74,7 +74,7 @@ export const applyJitter = (coord, index, total) => {
 };
 
 export const transformToMarkers = (rows = [], getGeoPoints = (row) => []) => {
-  const markers = [];
+  const baseMarkers = [];
   rows.forEach((row, rowIndex) => {
     const geoPoints = getGeoPoints(row);
     geoPoints.forEach((point, ptIndex) => {
@@ -83,20 +83,42 @@ export const transformToMarkers = (rows = [], getGeoPoints = (row) => []) => {
           ? { lat: Number(point.lat), lng: Number(point.lng) }
           : parseCoordinatePair(point?.coord));
       if (coord) {
-        markers.push({
+        baseMarkers.push({
           id: `${row.id}-${row.date}-${ptIndex}`,
           userId: row.user_id,
           date: row.date,
           label: point.label || point.type,
           type: point.type,
           hour: point.hour || point.time || null,
-          coord: applyJitter(coord, rowIndex * 10 + ptIndex, rows.length * 3),
+          coord,
           fullname: row.fullname,
+          _rawIndex: rowIndex * 1000 + ptIndex,
         });
       }
     });
   });
-  return markers;
+
+  const grouped = new Map();
+  baseMarkers.forEach((marker) => {
+    const key = `${marker.coord.lat.toFixed(6)},${marker.coord.lng.toFixed(6)}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(marker);
+  });
+
+  const markers = [];
+  grouped.forEach((group) => {
+    const total = group.length;
+    group
+      .sort((a, b) => a._rawIndex - b._rawIndex)
+      .forEach((marker, idx) => {
+        markers.push({
+          ...marker,
+          coord: applyJitter(marker.coord, idx, total),
+        });
+      });
+  });
+
+  return markers.map(({ _rawIndex, ...rest }) => rest);
 };
 
 export const getMarkerColor = (type) => {
@@ -104,6 +126,8 @@ export const getMarkerColor = (type) => {
     entry: "#22c55e",
     lunch_start: "#eab308",
     lunch_end: "#eab308",
+    op_lunch_start: "#f59e0b",
+    op_lunch_end: "#f59e0b",
     exit: "#ef4444",
     start: "#f97316",
     return: "#3b82f6",

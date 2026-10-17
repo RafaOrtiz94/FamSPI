@@ -1,29 +1,30 @@
 # AGENTS.md — module agent: integrations
 
 ## Proposito
-Gestionar integracion Odoo con patron outbox, sin logica de negocio local.
+Gestionar integraciones externas (CRM-FAM, casos externos, libro de
+correspondencia de productos) con patron outbox, sin logica de negocio local.
+La integracion a Odoo se elimino del sistema (Odoo ya no existe) -- ver
+`git log` sobre este archivo si necesitas el historial de esa remocion.
 
 ## Alcance exacto
 - `integrationOutbox.service.js`
-- `integrationOutboxWorker.service.js`
-- `odooClient.js`
-- `odoo.service.js`
+- `integrationOutboxWorker.service.js` (hoy solo despacha eventos `crm.*`)
+- `crm.service.js` / `crmWebhook.*`
 - `productMap.service.js`
-- `hooks.js`
 - `integrations.routes.js`
 
 ## Activar cuando
 - Fallo en encolado/procesamiento outbox.
-- Cambio de contrato con Odoo o mapeo de productos.
+- Cambio de contrato con CRM-FAM o mapeo de productos.
 
 ## Config relacionada
 
-- `backend/src/config/odooIntegration.js` — credenciales y base URL de Odoo
 - Migración: `129_integration_outbox.sql` y `125_integration_product_map.sql`
 
 ## Jobs relacionados
 
 - `jobs/externalCaseSyncScheduler.js` — sincroniza casos externos periódicamente
+- `jobs/crmSyncScheduler.js` — procesa la outbox filtrando `crm.%`
 
 ## No usar cuando
 - Cambio principal es en modulo origen (business-case/private-purchases/etc).
@@ -31,7 +32,6 @@ Gestionar integracion Odoo con patron outbox, sin logica de negocio local.
 
 ## Limites de scope
 - Maximo 3 archivos por tarea.
-- No tocar `odooClient.js` y `hooks.js` en una sola micro-tarea salvo bug bloqueante.
 - Prohibido agregar logica de dominio de FamSPI.
 
 ## Verificacion minima

@@ -148,9 +148,10 @@ async function calculateDeterminationCost({
 async function calculateEquipmentUtilization({ equipmentId, totalMonthlyTests }) {
     logger.info({ equipmentId, totalMonthlyTests }, 'Calculando utilización del equipo');
 
-    // Obtener capacidades del equipo
+    // Obtener capacidades del equipo. equipmentId viene de bc_equipment_selection,
+    // que referencia servicio.equipos (id_equipo) -- no public.equipment_models.
     const eqData = await db.query(
-        `SELECT capacity_per_hour, max_daily_capacity FROM public.equipment_models WHERE id = $1`,
+        `SELECT capacity_per_hour, max_daily_capacity FROM servicio.equipos WHERE id_equipo = $1`,
         [equipmentId]
     );
 

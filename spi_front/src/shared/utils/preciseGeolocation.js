@@ -1,9 +1,10 @@
 const DEFAULT_PRECISION_CONFIG = Object.freeze({
-  desiredAccuracyMeters: 35,
-  goodAccuracyMeters: 20,
-  highAccuracyTimeoutMs: 12000,
-  sampleWindowMs: 8000,
-  sampleCount: 3,
+  desiredAccuracyMeters: 30,
+  goodAccuracyMeters: 18,
+  highAccuracyTimeoutMs: 6500,
+  sampleWindowMs: 4200,
+  sampleCount: 2,
+  quickCoarseTimeoutMs: 2200,
 });
 
 const hasGeo = () =>
@@ -25,6 +26,14 @@ const getCurrentPosition = (options) =>
   new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(resolve, reject, options);
   });
+
+const getCurrentPositionSafe = async (options = {}) => {
+  try {
+    return await getCurrentPosition(options);
+  } catch {
+    return null;
+  }
+};
 
 const sampleBestPosition = (config) =>
   new Promise((resolve, reject) => {
@@ -92,6 +101,13 @@ export const getPreciseLocation = async (overrides = {}) => {
 
   const config = { ...DEFAULT_PRECISION_CONFIG, ...overrides };
 
+  // Fast coarse fallback in parallel so UX is not blocked on strict GPS locks.
+  const quickCoarsePromise = getCurrentPositionSafe({
+    enableHighAccuracy: false,
+    timeout: config.quickCoarseTimeoutMs,
+    maximumAge: 60 * 1000,
+  }).then((pos) => (pos ? asPoint(pos, "quick_coarse") : null));
+
   try {
     const first = await getCurrentPosition({
       enableHighAccuracy: true,
@@ -111,6 +127,8 @@ export const getPreciseLocation = async (overrides = {}) => {
       return firstPoint;
     }
   } catch (initialError) {
+    const quickCoarse = await quickCoarsePromise;
+    if (quickCoarse) return quickCoarse;
     try {
       return await sampleBestPosition(config);
     } catch {
@@ -118,4 +136,3 @@ export const getPreciseLocation = async (overrides = {}) => {
     }
   }
 };
-

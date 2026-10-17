@@ -7,20 +7,16 @@ const multer = require("multer");
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-const EDIT_CLIENT_ROLES = [
-  "comercial",
-  "acp_comercial",
-  "backoffice",
-  "backoffice_comercial",
-  "jefe_comercial",
-  "gerencia",
-  "gerente",
-  "admin",
-  "administrador",
-  "ti",
-];
+// backoffice_comercial: capacidad otorgada via extra_roles a un usuario
+// puntual (ver migrations/276_users_extra_roles.sql, ej. lorena.loaiza,
+// scope financiero) para manejar clientes igual que jefe_operaciones. El
+// frontend (ClientesPage.jsx, FULL_ACCESS_ROLES) ya le mostraba el
+// formulario de edicion sin que el backend lo aceptara -- 403 al guardar.
+const EDIT_CLIENT_ROLES = ["jefe_operaciones", "jefe_de_operaciones", "backoffice_comercial"];
 
-const ASSIGN_CLIENT_ROLES = ["jefe_comercial", "gerencia", "gerente", "admin", "administrador", "ti"];
+// backoffice_comercial tambien puede asignar clientes a asesores (ver
+// EDIT_CLIENT_ROLES arriba -- mismo caso, extra_roles).
+const ASSIGN_CLIENT_ROLES = ["jefe_operaciones", "jefe_de_operaciones", "backoffice_comercial"];
 
 const CRM_INTERACTION_ROLES = [
   "comercial",
@@ -33,6 +29,10 @@ const CRM_INTERACTION_ROLES = [
   "admin",
   "administrador",
   "ti",
+  // jefe_operaciones edita clientes (EDIT_CLIENT_ROLES) y esa vista tambien consulta
+  // ubicaciones/historial/interacciones.
+  "jefe_operaciones",
+  "jefe_de_operaciones",
 ];
 
 router.use(verifyToken);

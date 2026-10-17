@@ -1,0 +1,1046 @@
+<!doctype html>
+<title>KPI Mensual TI</title>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #F5F6F8;
+    --surface: #FFFFFF;
+    --surface-2: #ECF0F5;
+    --text: #171B24;
+    --text-muted: #5B6472;
+    --border: #DFE3E9;
+    --border-strong: #C7CDD6;
+    --accent: #2C5AA0;
+    --accent-strong: #1E4176;
+    --accent-soft: #E7EEF9;
+    --success: #157A50;
+    --success-soft: #E1F3EA;
+    --warning: #9C6404;
+    --warning-soft: #FAF0D9;
+    --critical: #B23349;
+    --critical-soft: #FBE8EB;
+    --shadow: 0 1px 2px rgba(23,27,36,0.04), 0 8px 24px -12px rgba(23,27,36,0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #10131A;
+      --surface: #191E27;
+      --surface-2: #212733;
+      --text: #E7EAEF;
+      --text-muted: #99A2B1;
+      --border: #2B3240;
+      --border-strong: #3A4356;
+      --accent: #7FA4E0;
+      --accent-strong: #A9C4EE;
+      --accent-soft: #1F2E47;
+      --success: #55C295;
+      --success-soft: #163227;
+      --warning: #E0B45C;
+      --warning-soft: #362A11;
+      --critical: #E68A98;
+      --critical-soft: #3A1E25;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #10131A;
+    --surface: #191E27;
+    --surface-2: #212733;
+    --text: #E7EAEF;
+    --text-muted: #99A2B1;
+    --border: #2B3240;
+    --border-strong: #3A4356;
+    --accent: #7FA4E0;
+    --accent-strong: #A9C4EE;
+    --accent-soft: #1F2E47;
+    --success: #55C295;
+    --success-soft: #163227;
+    --warning: #E0B45C;
+    --warning-soft: #362A11;
+    --critical: #E68A98;
+    --critical-soft: #3A1E25;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px -12px rgba(0,0,0,0.5);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    padding-inline: max(16px, calc((100vw - 1040px) / 2));
+    padding-block: 40px 64px;
+  }
+  .mono { font-family: "IBM Plex Mono", ui-monospace, "SF Mono", monospace; }
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  main { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 44px; }
+
+  /* ---------- Header ---------- */
+  header.report-head {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+  }
+  h1 {
+    font-size: clamp(26px, 4vw, 34px);
+    font-weight: 700;
+    margin: 0;
+    text-wrap: balance;
+    letter-spacing: -0.01em;
+  }
+  .head-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+    color: var(--text-muted);
+    font-size: 13.5px;
+  }
+  .head-meta b { color: var(--text); font-weight: 600; }
+
+  /* ---------- Section shell ---------- */
+  section { display: flex; flex-direction: column; gap: 18px; }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .section-head h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  .section-head .idx {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .section-note { color: var(--text-muted); font-size: 13.5px; max-width: 62ch; }
+
+  /* ---------- Tiles ---------- */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  .tile {
+    background: var(--surface);
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+  .tile .value {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .tile .label { font-size: 12.5px; color: var(--text-muted); }
+  .tile .sub { font-size: 12px; color: var(--text-muted); }
+  .tile .value.good { color: var(--success); }
+  .tile .value.warn { color: var(--warning); }
+  .tile .value.bad { color: var(--critical); }
+
+  /* ---------- Card / panel ---------- */
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px;
+    box-shadow: var(--shadow);
+  }
+  .panel h3 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin: 0 0 14px;
+  }
+  .panel-grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 20px; }
+  @media (max-width: 700px) { .panel-grid { grid-template-columns: 1fr; } }
+
+  /* ---------- Chart ---------- */
+  .chart-wrap svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 12px; color: var(--text-muted); }
+  .chart-legend .item { display: flex; align-items: center; gap: 6px; }
+  .chart-legend .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+  /* ---------- Badges ---------- */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 100px;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge.error { background: var(--critical-soft); color: var(--critical); }
+  .badge.dev { background: var(--accent-soft); color: var(--accent-strong); }
+  .badge.ok { background: var(--success-soft); color: var(--success); }
+  .badge.sla-breach { background: var(--warning-soft); color: var(--warning); }
+  .badge.sla-ok { background: var(--success-soft); color: var(--success); }
+  .badge.status-open { background: var(--warning-soft); color: var(--warning); }
+
+  /* ---------- Table ---------- */
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 720px; }
+  thead th {
+    text-align: left;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    font-weight: 600;
+    padding: 11px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+  }
+  tbody td { padding: 10px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--surface-2); }
+  td.num, th.num { text-align: right; font-family: "IBM Plex Mono", monospace; }
+  td.code { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+  td.title-cell { max-width: 320px; }
+  td.title-cell .t { font-weight: 500; }
+  td.title-cell .cat { color: var(--text-muted); font-size: 12px; }
+
+  /* ---------- Summary row (type breakdown) ---------- */
+  .type-rows { display: flex; flex-direction: column; gap: 10px; }
+  .type-row { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 12px; }
+  .type-row .name { font-size: 13px; font-weight: 600; }
+  .type-row .bar-track { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  .type-row .bar-fill { height: 100%; border-radius: 4px; }
+  .type-row .count { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--text-muted); text-align: right; }
+
+  /* ---------- Config list ---------- */
+  .kv-list { display: flex; flex-direction: column; gap: 0; }
+  .kv-row { display: flex; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px dashed var(--border); font-size: 13px; }
+  .kv-row:last-child { border-bottom: none; }
+  .kv-row .k { color: var(--text-muted); }
+  .kv-row .v { font-family: "IBM Plex Mono", monospace; font-weight: 500; text-align: right; }
+
+  /* ---------- Gap / methodology notes ---------- */
+  .notes {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 22px;
+    font-size: 13px;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .notes h3 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text); font-weight: 600; }
+  .notes ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+  .notes code { font-family: "IBM Plex Mono", monospace; background: var(--surface); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--border); font-size: 12px; color: var(--text); }
+
+  footer {
+    border-top: 1px solid var(--border);
+    padding-top: 18px;
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  /* ---------- KPI proposal panel ---------- */
+  .kpi-panel {
+    background: linear-gradient(180deg, var(--accent-soft), var(--surface) 60%);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px 24px;
+    box-shadow: var(--shadow);
+  }
+  .kpi-panel h2 { margin: 0 0 4px; font-size: 18px; font-weight: 700; }
+  .kpi-panel .kpi-sub { color: var(--text-muted); font-size: 13px; margin: 0 0 16px; max-width: 68ch; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+  .kpi-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .kpi-card .target { font-family: "IBM Plex Mono", monospace; font-size: 20px; font-weight: 600; color: var(--accent-strong); }
+  .kpi-card .metric { font-size: 12.5px; font-weight: 600; }
+  .kpi-card .evidence { font-size: 11.5px; color: var(--text-muted); }
+
+  /* ---------- Benchmark bars (us vs reference) ---------- */
+  .bench-row { display: flex; flex-direction: column; gap: 5px; margin-bottom: 16px; }
+  .bench-row:last-child { margin-bottom: 0; }
+  .bench-row .bench-label { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; }
+  .bench-row .bench-label .ref { font-weight: 500; color: var(--text-muted); font-size: 12px; }
+  .bench-track { position: relative; height: 22px; background: var(--surface-2); border-radius: 6px; overflow: hidden; }
+  .bench-fill { position: absolute; top: 0; left: 0; height: 100%; border-radius: 6px; background: var(--accent); display: flex; align-items: center; padding-inline: 8px; }
+  .bench-fill span { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: white; font-weight: 600; }
+  .bench-marker { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--warning); }
+  .bench-marker::after { content: attr(data-label); position: absolute; top: -16px; right: -2px; font-size: 10px; color: var(--warning); white-space: nowrap; font-family: "IBM Plex Mono", monospace; }
+  .dora-tier { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 100px; font-size: 12px; font-weight: 700; background: var(--success-soft); color: var(--success); }
+
+  /* ---------- Finance section ---------- */
+  .assump-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .assump-table th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); padding: 8px 10px; border-bottom: 1px solid var(--border-strong); }
+  .assump-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); }
+  .assump-table td.num { font-family: "IBM Plex Mono", monospace; text-align: right; }
+  .assump-table tfoot td { font-weight: 700; border-top: 2px solid var(--border-strong); border-bottom: none; padding-top: 12px; }
+  .value-hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .value-hero .big { font-family: "IBM Plex Mono", monospace; font-size: 40px; font-weight: 700; color: var(--accent-strong); letter-spacing: -0.02em; }
+  .value-hero .range { color: var(--text-muted); font-size: 14px; }
+  .caveat {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    background: var(--warning-soft);
+    border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 12.5px;
+    color: var(--text);
+  }
+  .caveat b { color: var(--warning); }
+
+  @media print {
+    body { padding: 0; }
+    .panel, .tiles, .table-scroll { box-shadow: none; }
+  }
+</style>
+
+<main>
+
+  <header class="report-head">
+    <span class="eyebrow">Informe de gestión · TI &amp; Plataforma SPI</span>
+    <h1>Propuesta de KPI mensual — soporte, entregas y disponibilidad</h1>
+    <div class="head-meta">
+      <span>Evidencia: <b>16 jun – 14 sep 2026</b> (últimos 3 meses, desglosados por mes)</span>
+      <span>Equipo: <b>1 desarrollador</b> (Rafael Ortiz)</span>
+      <span>Alcance: sistema de TI, servidor, aplicación web y base de datos</span>
+      <span>Generado: <b>14 sep 2026</b></span>
+    </div>
+  </header>
+
+  <div class="kpi-panel">
+    <h2>KPI mensual propuesto</h2>
+    <p class="kpi-sub">TI opera con <b>un único desarrollador</b> (Rafael Ortiz), encargado de todo: el servidor que procesa la información, la aplicación web que usan los colaboradores, la base de datos y el soporte técnico. Las metas están fijadas por debajo del promedio real de los últimos 3 meses (evidencia en las secciones 01–04) para que sean sostenibles para una sola persona — no el techo ya alcanzado, que además ya incluyó <b>67.5 horas extra</b> en el período (ver sección 05). Si esta propuesta se aprueba, su cumplimiento se podrá revisar en cualquier momento a través del canal de seguimiento continuo que se propone en la sección 08.</p>
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <div class="metric">Tickets de soporte resueltos</div>
+        <div class="target">≥ 5 / mes</div>
+        <div class="evidence">Promedio real: 9.5/mes (29 en 3 meses)</div>
+      </div>
+      <div class="kpi-card">
+        <div class="metric">Tiempo de respuesta a errores</div>
+        <div class="target">100% a tiempo</div>
+        <div class="evidence">0 de 4 errores resueltos fuera del plazo comprometido</div>
+      </div>
+      <div class="kpi-card">
+        <div class="metric">Actualizaciones sin fallas</div>
+        <div class="target">≥ 99.5% exitosas</div>
+        <div class="evidence">710 actualizaciones del servidor, 100% sin errores</div>
+      </div>
+      <div class="kpi-card">
+        <div class="metric">Sistema disponible para los usuarios</div>
+        <div class="target">≥ 98.5%</div>
+        <div class="evidence">98.73% real sobre 544,869 veces que se usó el sistema</div>
+      </div>
+      <div class="kpi-card">
+        <div class="metric">Costo del servidor bajo el tope de $20/mes</div>
+        <div class="target">100%</div>
+        <div class="evidence">No se ha superado el tope en ningún mes del período</div>
+      </div>
+      <div class="kpi-card">
+        <div class="metric">Horas extra <span class="badge sla-breach" style="margin-left:4px">indicador en riesgo</span></div>
+        <div class="target" style="color:var(--warning)">≤ 22.5 h / mes</div>
+        <div class="evidence">Promedio real: 22.5h/mes (67.5h en 3 meses) — techo, no piso. Jun ya superó el techo (30.3h).</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= TICKETS ================= -->
+  <section id="tickets" aria-labelledby="tickets-h">
+    <div class="section-head">
+      <h2 id="tickets-h"><span class="idx">01</span> Solicitudes de soporte resueltas</h2>
+    </div>
+    <p class="section-note">Solicitudes que los colaboradores reportaron al departamento de TI y que ya quedaron resueltas o cerradas, agrupadas según si fueron un error a corregir o un desarrollo nuevo pedido por el usuario.</p>
+
+    <div class="tiles">
+      <div class="tile">
+        <div class="value tabular">29</div>
+        <div class="label">Solicitudes resueltas</div>
+        <div class="sub">de 32 recibidas en el período</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular good">25</div>
+        <div class="label">Nuevos desarrollos</div>
+        <div class="sub">implementación + requerimiento · 86%</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular bad">4</div>
+        <div class="label">Errores / fallos</div>
+        <div class="sub">fallo + problema · 14%</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular">3</div>
+        <div class="label">Abiertos actualmente</div>
+        <div class="sub">2 reabierto · 1 en triage</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular">4.5<span style="font-size:15px;color:var(--text-muted)">/5</span></div>
+        <div class="label">Satisfacción promedio</div>
+        <div class="sub">6 de 29 calificaron el cierre</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Completados por mes, error vs. nuevo desarrollo</h3>
+      <div class="chart-wrap" id="chart-tickets"></div>
+      <div class="chart-legend">
+        <span class="item"><span class="swatch" style="background:var(--accent)"></span>Nuevo desarrollo (implementación + requerimiento)</span>
+        <span class="item"><span class="swatch" style="background:var(--critical)"></span>Error / fallo (problema + fallo)</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Desglose por tipo de ticket</h3>
+      <div class="type-rows" id="type-rows"></div>
+    </div>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Solicitud</th>
+            <th>Tipo</th>
+            <th>Recibido</th>
+            <th>Resuelto</th>
+            <th class="num">Tiempo</th>
+            <th>Plazo</th>
+          </tr>
+        </thead>
+        <tbody id="tickets-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= DEPLOYS ================= -->
+  <section id="deploys" aria-labelledby="deploys-h">
+    <div class="section-head">
+      <h2 id="deploys-h"><span class="idx">02</span> Mejoras y correcciones publicadas</h2>
+    </div>
+    <p class="section-note">Cada vez que se corrige un error o se agrega algo nuevo, ese cambio se "publica" para que quede activo en el sistema que usan los colaboradores. El sistema tiene dos partes: el <b>servidor</b> (procesa la información detrás de escena) y la <b>aplicación web</b> (la pantalla que ve y usa la gente). Las cifras de abajo son publicaciones reales, no estimadas.</p>
+
+    <div class="tiles">
+      <div class="tile">
+        <div class="value tabular">1,488</div>
+        <div class="label">Publicaciones totales</div>
+        <div class="sub">710 al servidor + 778 a la aplicación web</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular good">100%</div>
+        <div class="label">Publicaciones sin errores</div>
+        <div class="sub">ninguna falló en el servidor</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular">~16.2</div>
+        <div class="label">Publicaciones por día</div>
+        <div class="sub">promedio combinado, 16 jun – 14 sep</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Publicaciones por mes</h3>
+      <div class="chart-wrap" id="chart-deploys"></div>
+      <div class="chart-legend">
+        <span class="item"><span class="swatch" style="background:var(--accent)"></span>Servidor</span>
+        <span class="item"><span class="swatch" style="background:var(--success)"></span>Aplicación web</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= DISPONIBILIDAD ================= -->
+  <section id="availability" aria-labelledby="availability-h">
+    <div class="section-head">
+      <h2 id="availability-h"><span class="idx">03</span> Disponibilidad del sistema</h2>
+    </div>
+    <p class="section-note">Cada vez que alguien usa el sistema (abre una pantalla, guarda un dato, genera un reporte), el servidor responde. Aquí se mide qué tan seguido esa respuesta fue correcta versus qué tan seguido hubo un error, en el período completo.</p>
+
+    <div class="tiles">
+      <div class="tile">
+        <div class="value tabular">544,869</div>
+        <div class="label">Veces que se usó el sistema</div>
+        <div class="sub">16 jun – 14 sep 2026</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular good">98.73%</div>
+        <div class="label">Respondió sin error</div>
+        <div class="sub">el sistema funcionó correctamente</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular bad">1.27%</div>
+        <div class="label">Errores del sistema</div>
+        <div class="sub">6,900 de 544,869 veces — algo falló de nuestro lado</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular warn">0.42%</div>
+        <div class="label">Errores de datos</div>
+        <div class="sub">2,300 veces — un dato mal ingresado o incompleto</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Cómo respondió el sistema</h3>
+      <div class="chart-wrap" id="chart-http"></div>
+      <div class="chart-legend" id="http-legend"></div>
+    </div>
+  </section>
+
+  <!-- ================= COSTO DE INFRAESTRUCTURA ================= -->
+  <section id="quota" aria-labelledby="quota-h">
+    <div class="section-head">
+      <h2 id="quota-h"><span class="idx">04</span> Costo del servidor — dentro del tope mensual</h2>
+    </div>
+    <p class="section-note">El servidor donde vive el sistema (Google Cloud) sí tiene costo — no es gratis — y tiene un <b>tope de gasto de $20 al mes</b> acordado para este proyecto. Se ha mantenido por debajo de ese tope <b>todos los meses</b>. La base de datos (Neon) sí se mantiene en $0.</p>
+
+    <div class="panel panel-grid">
+      <div>
+        <h3>Qué tan cerca del tope de $20 estuvo cada mes (aproximado)</h3>
+        <div class="chart-wrap" id="chart-quota"></div>
+      </div>
+      <div>
+        <h3>Cómo se mantiene el costo bajo</h3>
+        <div class="kv-list">
+          <div class="kv-row"><span class="k">Cuando nadie usa el sistema</span><span class="v">se apaga solo, no genera costo</span></div>
+          <div class="kv-row"><span class="k">En horas de mucho uso</span><span class="v">se encienden hasta 3 copias</span></div>
+          <div class="kv-row"><span class="k">Capacidad de cada copia</span><span class="v">1 unidad de procesamiento</span></div>
+          <div class="kv-row"><span class="k">Memoria de cada copia</span><span class="v">512 MB</span></div>
+          <div class="kv-row"><span class="k">Personas atendidas a la vez</span><span class="v">50 por copia</span></div>
+          <div class="kv-row"><span class="k">Tareas automáticas nocturnas</span><span class="v">1 copia dedicada</span></div>
+          <div class="kv-row"><span class="k">Base de datos (Neon)</span><span class="v">$0 — plan gratuito</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tiles">
+      <div class="tile">
+        <div class="value tabular">$20</div>
+        <div class="label">Tope de gasto mensual acordado</div>
+        <div class="sub">no se ha superado en ningún mes del período</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular good">$0</div>
+        <div class="label">Costo de la base de datos</div>
+        <div class="sub">Neon, plan gratuito</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular">36.9%</div>
+        <div class="label">Uso de servidor · julio (aprox.)</div>
+        <div class="sub">el mes de mayor consumo del período</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular good">&lt;0.2%</div>
+        <div class="label">Uso del límite de operaciones</div>
+        <div class="sub">~228 mil de 2 millones de usos permitidos al mes</div>
+      </div>
+    </div>
+
+    <div class="notes">
+      <h3>Nota de alcance</h3>
+      <ul>
+        <li>Los porcentajes de uso del servidor (36.9% / 25.2% / 21.7%) son una <b>aproximación</b> de qué tan cerca se estuvo del tope, calculada por capacidad de procesamiento usada — no son el monto exacto en dólares facturado. El monto exacto en dólares no se pudo extraer automáticamente porque el proyecto no tiene configurada una exportación de facturación; se puede consultar directamente en Google Cloud Billing → Informes.</li>
+        <li>No hay dato de consumo disponible para junio — el proveedor solo guarda esa información por un tiempo limitado y ya no cubría esa fecha al momento de consultar.</li>
+        <li>El ambiente de pruebas (separado del que usan los colaboradores) no está incluido — consume presupuesto aparte y su uso es mínimo.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ================= CAPACIDAD / HORAS EXTRA ================= -->
+  <section id="capacity" aria-labelledby="capacity-h">
+    <div class="section-head">
+      <h2 id="capacity-h"><span class="idx">05</span> Capacidad real del equipo — horas extra</h2>
+    </div>
+    <p class="section-note">TI es un equipo de <b>1 persona</b>. Estas son las horas extra reales registradas por Rafael Ortiz en el sistema de asistencia — son la base para calibrar qué tan sostenibles son las metas de arriba.</p>
+
+    <div class="tiles">
+      <div class="tile">
+        <div class="value tabular warn">67.5h</div>
+        <div class="label">Horas extra, 3 meses</div>
+        <div class="sub">24 de 67 días con jornada registrada</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular">313h</div>
+        <div class="label">Horas totales registradas</div>
+        <div class="sub">jornada regular + extra, 67 días</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular">22.5h</div>
+        <div class="label">Extra promedio / mes</div>
+        <div class="sub">equivalente a ~3 jornadas completas</div>
+      </div>
+      <div class="tile">
+        <div class="value tabular bad">35.8%</div>
+        <div class="label">Días con horas extra</div>
+        <div class="sub">1 de cada 3 días trabajados</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Horas extra por mes</h3>
+      <div class="chart-wrap" id="chart-overtime"></div>
+    </div>
+
+    <div class="caveat">
+      <span>⚠️</span>
+      <span>Todo lo mostrado en las secciones 01–04 (29 solicitudes resueltas, 1,488 publicaciones, 98.73% de disponibilidad) se logró <b>con 67.5 horas extra ya invertidas</b> por una sola persona en 3 meses. Las metas de la sección de arriba están calibradas contra este límite real, no contra una capacidad ilimitada — subirlas sin sumar más personal implicaría más horas extra, no solo "más esfuerzo".</span>
+    </div>
+  </section>
+
+  <!-- ================= COMPARATIVA ================= -->
+  <section id="benchmark" aria-labelledby="benchmark-h">
+    <div class="section-head">
+      <h2 id="benchmark-h"><span class="idx">06</span> Comparación con un equipo de desarrollo senior</h2>
+    </div>
+    <p class="section-note">Se compara contra <b>DORA</b>, un estudio internacional que desde hace más de 10 años mide qué tan ágiles y confiables son los equipos de tecnología en miles de empresas del mundo — no son cifras de una empresa puntual, son los rangos que ese estudio considera "de clase mundial". Recordatorio: del lado de SPI estos números los produce <b>1 sola persona</b>, no un equipo.</p>
+
+    <div class="panel">
+      <h3>Qué tan seguido se publican mejoras (por día, escala 0–20)</h3>
+      <div class="bench-row">
+        <div class="bench-label"><span>SPI (real, este período)</span><span class="ref">16.2 publicaciones/día combinadas</span></div>
+        <div class="bench-track">
+          <div class="bench-fill" style="width:81%"><span>16.2/día</span></div>
+          <div class="bench-marker" style="left:5%" data-label="Nivel más alto: 1/día o más"></div>
+        </div>
+      </div>
+      <p style="margin:10px 0 0;font-size:13px">SPI publica mejoras <b>16 veces más seguido</b> que el mínimo que este estudio exige para el nivel más alto ("Elite": 1 publicación por día o más) — un nivel que normalmente alcanzan equipos completos de varias personas, no un solo desarrollador.</p>
+    </div>
+
+    <div class="panel">
+      <h3>Porcentaje de publicaciones con errores (escala 0–20%)</h3>
+      <div class="bench-row">
+        <div class="bench-label"><span>SPI (real)</span><span class="ref">1.27% de usos del sistema con error</span></div>
+        <div class="bench-track">
+          <div class="bench-fill" style="width:6.35%"><span>1.3%</span></div>
+          <div class="bench-marker" style="left:75%" data-label="Nivel más alto: 15% o menos"></div>
+        </div>
+      </div>
+      <p style="margin:10px 0 0;font-size:13px">Muy por debajo del límite del nivel más alto del estudio (15% o menos de cambios que necesitan corrección posterior).</p>
+    </div>
+
+    <div class="panel">
+      <h3>Solicitudes resueltas por semana (escala 0–10)</h3>
+      <div class="bench-row">
+        <div class="bench-label"><span>SPI (real)</span><span class="ref">2.2 solicitudes/semana</span></div>
+        <div class="bench-track">
+          <div class="bench-fill" style="width:22%"><span>2.2/sem</span></div>
+          <div class="bench-marker" style="left:30%" data-label="Referencia de industria: 3–8/sem"></div>
+        </div>
+      </div>
+      <p style="margin:10px 0 0;font-size:13px">Por debajo del rango de referencia citado para equipos ágiles (3 a 8 solicitudes resueltas por semana por desarrollador) — <b>lectura honesta:</b> esta cifra no refleja el esfuerzo real, porque la mayoría del trabajo del período fue construir plataforma nueva, no atender solicitudes puntuales (289 cambios de base de datos, módulos completos nuevos, inventario, solicitudes). El indicador de publicaciones (arriba) retrata mejor la intensidad real de entrega que el conteo de solicitudes.</p>
+    </div>
+  </section>
+
+  <!-- ================= VALOR FINANCIERO ================= -->
+  <section id="finance" aria-labelledby="finance-h">
+    <div class="section-head">
+      <h2 id="finance-h"><span class="idx">07</span> Valor de los desarrollos para finanzas</h2>
+    </div>
+    <p class="section-note">Estimación de cuánto costaría contratar afuera (una empresa externa de desarrollo) los 25 desarrollos nuevos completados en el período — no incluye las 4 solicitudes de corrección de errores, porque eso es mantenimiento, no valor nuevo agregado.</p>
+
+    <div class="caveat">
+      <span>⚠️</span>
+      <span><b>Esto es una estimación con supuestos explícitos, no una cifra de facturación real.</b> No existen registros de horas por solicitud; se usa un promedio de esfuerzo por tipo de solicitud y una tarifa de referencia de empresas externas de desarrollo. Ajustar los supuestos de la tabla si finanzas tiene mejores datos.</span>
+    </div>
+
+    <div class="panel panel-grid">
+      <div>
+        <h3>Supuestos y cálculo</h3>
+        <table class="assump-table">
+          <thead>
+            <tr><th>Tipo de desarrollo</th><th class="num">Solicitudes</th><th class="num">Horas c/u (est.)</th><th class="num">Horas totales</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Requerimiento (feature puntual, reporte, filtro)</td><td class="num tabular">17</td><td class="num tabular">8h</td><td class="num tabular">136h</td></tr>
+            <tr><td>Implementación (módulo / integración nueva)</td><td class="num tabular">8</td><td class="num tabular">20h</td><td class="num tabular">160h</td></tr>
+          </tbody>
+          <tfoot>
+            <tr><td colspan="3">Total estimado</td><td class="num tabular">296h</td></tr>
+          </tfoot>
+        </table>
+      </div>
+      <div>
+        <h3>Tarifa de referencia (empresa externa)</h3>
+        <div class="kv-list">
+          <div class="kv-row"><span class="k">Tarifa baja (referencia)</span><span class="v">USD 40/h</span></div>
+          <div class="kv-row"><span class="k">Tarifa alta (referencia)</span><span class="v">USD 70/h</span></div>
+          <div class="kv-row"><span class="k">Tarifa media usada</span><span class="v">USD 55/h</span></div>
+          <div class="kv-row"><span class="k">Horas totales estimadas</span><span class="v">296h</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Valor estimado de los 25 desarrollos del período</h3>
+      <div class="value-hero">
+        <span class="big tabular">$16,280</span>
+        <span class="range">rango USD 11,840 – 20,720, según la tarifa externa usada (USD 40–70/hora)</span>
+      </div>
+      <p style="margin:14px 0 0;font-size:13px;color:var(--text-muted)">Equivalente a <b class="tabular" style="color:var(--text)">USD 5,427/mes</b> en promedio de valor de desarrollo entregado internamente durante el trimestre (a tarifa media), sin contar ahorro de tiempo de coordinación ni el costo de retrasos de un proveedor externo.</p>
+    </div>
+  </section>
+
+  <!-- ================= PROPUESTA: SEGUIMIENTO CONTINUO ================= -->
+  <section id="monitoring" aria-labelledby="monitoring-h">
+    <div class="section-head">
+      <h2 id="monitoring-h"><span class="idx">08</span> Propuesta: canal de seguimiento continuo del KPI</h2>
+    </div>
+    <p class="section-note">Hoy, saber si se está cumpliendo la meta mensual requiere armar un informe manual como este, cada vez. Se propone construir un lugar permanente donde cualquier persona autorizada (TI, gerencia, finanzas) pueda revisar el estado de estos indicadores en cualquier momento, sin esperar a un informe nuevo.</p>
+
+    <div class="kpi-panel">
+      <h2>Módulo de Gestión y Cumplimiento de KPIs</h2>
+      <p class="kpi-sub">Si esta propuesta se aprueba, como parte del compromiso se desarrollará este módulo dentro del sistema — <b>no existe todavía</b>, es parte de lo que se está pidiendo aprobar. Incluiría:</p>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="metric">Estado de cada indicador</div>
+          <div class="target" style="font-size:15px">Siempre visible</div>
+          <div class="evidence">Los mismos 6 indicadores de la propuesta (sección de arriba), actualizados solos — sin armar un informe a mano cada vez.</div>
+        </div>
+        <div class="kpi-card">
+          <div class="metric">Semáforo de cumplimiento</div>
+          <div class="target" style="font-size:15px">Verde / amarillo / rojo</div>
+          <div class="evidence">Un color que avisa de un vistazo si algo está bien, en alerta o ya fuera de meta — igual al indicador de horas extra de este informe.</div>
+        </div>
+        <div class="kpi-card">
+          <div class="metric">Historial mes a mes</div>
+          <div class="target" style="font-size:15px">Tendencia visible</div>
+          <div class="evidence">Ver cómo evoluciona cada indicador sin tener que pedir un informe nuevo cada vez.</div>
+        </div>
+        <div class="kpi-card">
+          <div class="metric">Aviso temprano</div>
+          <div class="target" style="font-size:15px">Alerta automática</div>
+          <div class="evidence">Por ejemplo: si las horas extra de un mes ya van altas antes de que el mes termine.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Datos consultados en vivo, en el momento de generar este informe (14 sep 2026), directamente desde los sistemas del proveedor de nube, el sistema de tickets de soporte y el sistema de asistencia. Comparación de industria: estudio DORA / Accelerate (Google Cloud), de acceso público.</span>
+    <span>FamSPI · Plataforma SPI</span>
+  </footer>
+
+</main>
+
+<script>
+(function () {
+  const svgNS = "http://www.w3.org/2000/svg";
+  function el(tag, attrs) {
+    const n = document.createElementNS(svgNS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+  function textNode(x, y, str, opts) {
+    opts = opts || {};
+    const t = el("text", Object.assign({ x, y, style: "fill:var(--text-muted)", "font-family": "IBM Plex Mono, monospace", "font-size": opts.size || 11 }, opts.attrs || {}));
+    if (opts.anchor) t.setAttribute("text-anchor", opts.anchor);
+    t.textContent = str;
+    return t;
+  }
+
+  // ---------- Grouped bar chart: tickets by month, dev vs error ----------
+  (function () {
+    const data = [
+      { month: "Jun", dev: 7, err: 1 },
+      { month: "Jul", dev: 8, err: 1 },
+      { month: "Ago", dev: 4, err: 0 },
+      { month: "Sep*", dev: 7, err: 1 },
+    ];
+    const w = 760, h = 220, padL = 34, padB = 30, padT = 14, padR = 10;
+    const plotW = w - padL - padR, plotH = h - padT - padB;
+    const maxV = 9;
+    const groupW = plotW / data.length;
+    const barW = groupW * 0.26;
+    const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": "Tickets completados por mes, desarrollo vs error" });
+
+    [0, 3, 6, 9].forEach((v) => {
+      const y = padT + plotH - (v / maxV) * plotH;
+      svg.appendChild(el("line", { x1: padL, x2: w - padR, y1: y, y2: y, style: "stroke:var(--border)", "stroke-width": 1 }));
+      svg.appendChild(textNode(padL - 8, y + 3, String(v), { anchor: "end", size: 10 }));
+    });
+
+    data.forEach((d, i) => {
+      const gx = padL + i * groupW + groupW / 2;
+      const devH = (d.dev / maxV) * plotH;
+      const errH = (d.err / maxV) * plotH;
+      const devX = gx - barW - 3;
+      const errX = gx + 3;
+
+      svg.appendChild(el("rect", { x: devX, y: padT + plotH - devH, width: barW, height: Math.max(devH, 1), rx: 3, style: "fill:var(--accent)" }));
+      if (d.dev > 0) svg.appendChild(textNode(devX + barW / 2, padT + plotH - devH - 6, String(d.dev), { anchor: "middle", size: 11, attrs: { style: "fill:var(--text)" } }));
+
+      svg.appendChild(el("rect", { x: errX, y: padT + plotH - errH, width: barW, height: Math.max(errH, 1), rx: 3, style: "fill:var(--critical)" }));
+      if (d.err > 0) svg.appendChild(textNode(errX + barW / 2, padT + plotH - errH - 6, String(d.err), { anchor: "middle", size: 11, attrs: { style: "fill:var(--text)" } }));
+
+      svg.appendChild(textNode(gx, h - 8, d.month, { anchor: "middle", size: 11 }));
+    });
+    svg.appendChild(el("line", { x1: padL, x2: w - padR, y1: padT + plotH, y2: padT + plotH, style: "stroke:var(--border-strong)", "stroke-width": 1 }));
+
+    document.getElementById("chart-tickets").appendChild(svg);
+    const note = document.createElement("div");
+    note.style.cssText = "font-size:11px;color:var(--text-muted);margin-top:6px";
+    note.textContent = "*septiembre: datos hasta el día 14 (mes parcial)";
+    document.getElementById("chart-tickets").appendChild(note);
+  })();
+
+  // ---------- Type breakdown rows ----------
+  (function () {
+    const rows = [
+      { name: "Requerimiento", count: 17, color: "var(--accent)" },
+      { name: "Implementación", count: 8, color: "var(--accent)" },
+      { name: "Problema", count: 2, color: "var(--critical)" },
+      { name: "Fallo", count: 2, color: "var(--critical)" },
+    ];
+    const max = 17;
+    const host = document.getElementById("type-rows");
+    rows.forEach((r) => {
+      const row = document.createElement("div");
+      row.className = "type-row";
+      const name = document.createElement("div"); name.className = "name"; name.textContent = r.name;
+      const track = document.createElement("div"); track.className = "bar-track";
+      const fill = document.createElement("div"); fill.className = "bar-fill";
+      fill.style.width = (r.count / max * 100) + "%";
+      fill.style.background = r.color;
+      track.appendChild(fill);
+      const count = document.createElement("div"); count.className = "count tabular"; count.textContent = r.count + " ticket" + (r.count === 1 ? "" : "s");
+      row.appendChild(name); row.appendChild(track); row.appendChild(count);
+      host.appendChild(row);
+    });
+  })();
+
+  // ---------- Tickets table ----------
+  (function () {
+    const tickets = [
+      ["TK-000012","Reporte de novedades por colaborador","requerimiento","2026-06-24","2026-06-24","4h",false],
+      ["TK-000013","Módulo asistencia","implementacion","2026-06-24","2026-06-24","4h",false],
+      ["TK-000015","Reporte de asistencia","fallo","2026-06-24","2026-06-24","8h",false],
+      ["TK-000014","Selección de departamento","requerimiento","2026-06-24","2026-06-25","24h",false],
+      ["TK-000016","Cambio de campo","requerimiento","2026-06-24","2026-06-24","7h",false],
+      ["TK-000017","Oferta salarial","requerimiento","2026-06-24","2026-06-24","7h",false],
+      ["TK-000018","Partida de nacimiento / cédula (hijos)","implementacion","2026-06-25","2026-06-25","0.3h",false],
+      ["TK-000020","Calificación de ticket","problema","2026-06-30","2026-06-30","0.5h",false],
+      ["TK-000022","Filtro por IMED y N° de factura en activos fijos","requerimiento","2026-06-30","2026-07-08","188h",true],
+      ["TK-000023","Implemento de institución bancaria","implementacion","2026-07-02","2026-07-08","141h",true],
+      ["TK-000028","Reporte de regularización","implementacion","2026-07-03","2026-07-09","125h",true],
+      ["TK-000027","Módulo asistencia — reporte permisos","implementacion","2026-07-03","2026-07-09","126h",true],
+      ["TK-000026","Módulo entrega herramientas","requerimiento","2026-07-03","2026-07-09","126h",true],
+      ["TK-000030","Acta entrega herramientas","requerimiento","2026-07-08","2026-07-09","8h",true],
+      ["TK-000029","Módulo de gestión colaboradores","requerimiento","2026-07-07","2026-07-17","236h",true],
+      ["TK-000031","Lista de cargos","requerimiento","2026-07-13","2026-07-17","91h",true],
+      ["TK-000034","Numeración de acta de herramienta","problema","2026-07-27","2026-07-27","2h",false],
+      ["TK-000037","Habilitar acceso a pasantes","implementacion","2026-08-17","2026-08-18","24h",true],
+      ["TK-000036","Visualización de archivos parciales","requerimiento","2026-08-03","2026-08-18","365h",true],
+      ["TK-000035","Correos de clientes en cronograma de visitas","requerimiento","2026-07-31","2026-08-18","455h",true],
+      ["TK-000033","Entrega colaboradores — ropa de trabajo","requerimiento","2026-07-24","2026-08-25","765h",true],
+      ["TK-000040","Ventanas emergentes","fallo","2026-09-07","2026-09-07","6h",false],
+      ["TK-000039","Impresión de registros de vacaciones/permisos","requerimiento","2026-08-25","2026-09-07","311h",true],
+      ["TK-000025","Módulo vacaciones","implementacion","2026-07-03","2026-09-07","1608h",true],
+      ["TK-000042","Actualización de links de interés","requerimiento","2026-09-08","2026-09-08","0.1h",false],
+      ["TK-000043","Restringir vista de documentos RRHH","implementacion","2026-09-08","2026-09-09","22h",true],
+      ["TK-000041","Filtro actas entrega equipos tecnológicos","requerimiento","2026-09-08","2026-09-09","28h",true],
+      ["TK-000032","QR de preguntas para Fam Days","requerimiento","2026-07-17","2026-09-09","1367h",true],
+      ["TK-000019","Implementación de opción","requerimiento","2026-06-29","2026-09-09","1655h",true],
+    ];
+    const typeLabel = { requerimiento: "Desarrollo", implementacion: "Desarrollo", problema: "Error", fallo: "Error" };
+    const typeBadge = { requerimiento: "dev", implementacion: "dev", problema: "error", fallo: "error" };
+    const tbody = document.getElementById("tickets-tbody");
+    tickets.forEach(([code, title, type, created, resolved, dur, breach]) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td class="code">${code}</td>
+        <td class="title-cell"><div class="t">${title}</div></td>
+        <td><span class="badge ${typeBadge[type]}">${typeLabel[type]}</span></td>
+        <td class="tabular">${created}</td>
+        <td class="tabular">${resolved}</td>
+        <td class="num tabular">${dur}</td>
+        <td>${breach ? '<span class="badge sla-breach">Fuera de plazo</span>' : '<span class="badge sla-ok">A tiempo</span>'}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  })();
+
+  // ---------- Deploys per month bar chart (backend vs frontend) ----------
+  (function () {
+    const data = [
+      { month: "Jun*", backend: 168, frontend: 187 },
+      { month: "Jul", backend: 377, frontend: 426 },
+      { month: "Ago", backend: 107, frontend: 87 },
+      { month: "Sep*", backend: 58, frontend: 78 },
+    ];
+    const w = 760, h = 210, padL = 40, padB = 28, padT = 16, padR = 10;
+    const plotW = w - padL - padR, plotH = h - padT - padB;
+    const maxV = 440;
+    const groupW = plotW / data.length;
+    const barW = groupW * 0.28;
+    const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": "Publicaciones al servidor y a la aplicación web por mes" });
+
+    [0, 110, 220, 330, 440].forEach((v) => {
+      const y = padT + plotH - (v / maxV) * plotH;
+      svg.appendChild(el("line", { x1: padL, x2: w - padR, y1: y, y2: y, style: "stroke:var(--border)", "stroke-width": 1 }));
+      svg.appendChild(textNode(padL - 8, y + 3, String(v), { anchor: "end", size: 10 }));
+    });
+
+    data.forEach((d, i) => {
+      const gx = padL + i * groupW + groupW / 2;
+      const beH = (d.backend / maxV) * plotH;
+      const feH = (d.frontend / maxV) * plotH;
+      const beX = gx - barW - 3;
+      const feX = gx + 3;
+
+      svg.appendChild(el("rect", { x: beX, y: padT + plotH - beH, width: barW, height: beH, rx: 3, style: "fill:var(--accent)" }));
+      svg.appendChild(textNode(beX + barW / 2, padT + plotH - beH - 6, String(d.backend), { anchor: "middle", size: 10.5, attrs: { style: "fill:var(--text);font-weight:600" } }));
+
+      svg.appendChild(el("rect", { x: feX, y: padT + plotH - feH, width: barW, height: feH, rx: 3, style: "fill:var(--success)" }));
+      svg.appendChild(textNode(feX + barW / 2, padT + plotH - feH - 6, String(d.frontend), { anchor: "middle", size: 10.5, attrs: { style: "fill:var(--text);font-weight:600" } }));
+
+      svg.appendChild(textNode(gx, h - 6, d.month, { anchor: "middle", size: 11 }));
+    });
+    svg.appendChild(el("line", { x1: padL, x2: w - padR, y1: padT + plotH, y2: padT + plotH, style: "stroke:var(--border-strong)", "stroke-width": 1 }));
+    document.getElementById("chart-deploys").appendChild(svg);
+    const note = document.createElement("div");
+    note.style.cssText = "font-size:11px;color:var(--text-muted);margin-top:6px";
+    note.textContent = "*junio: datos desde el día 16 · septiembre: datos hasta el día 14 (meses parciales)";
+    document.getElementById("chart-deploys").appendChild(note);
+  })();
+
+  // ---------- HTTP response distribution (horizontal stacked bar) ----------
+  (function () {
+    const segments = [
+      { label: "Respuesta correcta", value: 533041, color: "var(--success)" },
+      { label: "Redirigido automáticamente", value: 2628, color: "var(--accent)" },
+      { label: "Error de datos (dato mal enviado)", value: 2300, color: "var(--warning)" },
+      { label: "Error del sistema", value: 6900, color: "var(--critical)" },
+    ];
+    const total = segments.reduce((a, s) => a + s.value, 0);
+    const w = 760, h = 64, padL = 0, padR = 0;
+    const plotW = w - padL - padR;
+    const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": "Cómo respondió el sistema en cada interacción" });
+    let x = padL;
+    segments.forEach((s) => {
+      const sw = Math.max((s.value / total) * plotW, s.value > 0 ? 2 : 0);
+      svg.appendChild(el("rect", { x, y: 10, width: sw, height: 30, style: `fill:${s.color}` }));
+      x += sw;
+    });
+    svg.appendChild(textNode(padL, 58, "0", { size: 10 }));
+    svg.appendChild(textNode(w - padR, 58, total.toLocaleString("es-EC"), { anchor: "end", size: 10 }));
+    document.getElementById("chart-http").appendChild(svg);
+
+    const legend = document.getElementById("http-legend");
+    segments.forEach((s) => {
+      const pct = (s.value / total * 100).toFixed(2);
+      const item = document.createElement("span");
+      item.className = "item";
+      item.innerHTML = `<span class="swatch" style="background:${s.color}"></span>${s.label}: <b class="tabular" style="color:var(--text)">${s.value.toLocaleString("es-EC")}</b> (${pct}%)`;
+      legend.appendChild(item);
+    });
+  })();
+
+  // ---------- Quota usage bar chart with free-tier reference line (shown as % of budget) ----------
+  (function () {
+    const data = [
+      { month: "Jul", value: 36.9 },
+      { month: "Ago", value: 25.2 },
+      { month: "Sep*", value: 21.7 },
+    ];
+    const quota = 100;
+    const w = 380, h = 230, padL = 40, padB = 28, padT = 16, padR = 14;
+    const plotW = w - padL - padR, plotH = h - padT - padB;
+    const maxV = quota;
+    const groupW = plotW / data.length;
+    const barW = groupW * 0.5;
+    const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": "Aproximación de uso de servidor frente al tope de gasto mensual, por mes" });
+
+    [0, 25, 50, 75, 100].forEach((v) => {
+      const y = padT + plotH - (v / maxV) * plotH;
+      svg.appendChild(el("line", { x1: padL, x2: w - padR, y1: y, y2: y, style: v === quota ? "stroke:var(--warning)" : "stroke:var(--border)", "stroke-width": 1, "stroke-dasharray": v === quota ? "4 3" : "0" }));
+      svg.appendChild(textNode(padL - 8, y + 3, v + "%", { anchor: "end", size: 10 }));
+    });
+    svg.appendChild(textNode(w - padR, padT + plotH - (quota / maxV) * plotH - 5, "tope de $20/mes", { anchor: "end", size: 10, attrs: { style: "fill:var(--warning)" } }));
+
+    data.forEach((d, i) => {
+      const gx = padL + i * groupW + groupW / 2;
+      const bh = (d.value / maxV) * plotH;
+      svg.appendChild(el("rect", { x: gx - barW / 2, y: padT + plotH - bh, width: barW, height: bh, rx: 4, style: "fill:var(--accent)" }));
+      svg.appendChild(textNode(gx, padT + plotH - bh - 8, d.value.toFixed(1) + "%", { anchor: "middle", size: 11, attrs: { style: "fill:var(--text);font-weight:600" } }));
+      svg.appendChild(textNode(gx, h - 6, d.month, { anchor: "middle", size: 11 }));
+    });
+    svg.appendChild(el("line", { x1: padL, x2: w - padR, y1: padT + plotH, y2: padT + plotH, style: "stroke:var(--border-strong)", "stroke-width": 1 }));
+    document.getElementById("chart-quota").appendChild(svg);
+  })();
+
+  // ---------- Overtime hours per month ----------
+  (function () {
+    const data = [
+      { month: "Jun*", value: 30.3 },
+      { month: "Jul", value: 12.5 },
+      { month: "Ago", value: 13.4 },
+      { month: "Sep*", value: 11.3 },
+    ];
+    const w = 760, h = 190, padL = 40, padB = 28, padT = 16, padR = 10;
+    const plotW = w - padL - padR, plotH = h - padT - padB;
+    const maxV = 32;
+    const groupW = plotW / data.length;
+    const barW = groupW * 0.4;
+    const svg = el("svg", { viewBox: `0 0 ${w} ${h}`, role: "img", "aria-label": "Horas extra por mes" });
+
+    [0, 8, 16, 24, 32].forEach((v) => {
+      const y = padT + plotH - (v / maxV) * plotH;
+      svg.appendChild(el("line", { x1: padL, x2: w - padR, y1: y, y2: y, style: "stroke:var(--border)", "stroke-width": 1 }));
+      svg.appendChild(textNode(padL - 8, y + 3, String(v), { anchor: "end", size: 10 }));
+    });
+
+    data.forEach((d, i) => {
+      const gx = padL + i * groupW + groupW / 2;
+      const bh = (d.value / maxV) * plotH;
+      svg.appendChild(el("rect", { x: gx - barW / 2, y: padT + plotH - bh, width: barW, height: bh, rx: 4, style: "fill:var(--warning)" }));
+      svg.appendChild(textNode(gx, padT + plotH - bh - 8, d.value.toFixed(1) + "h", { anchor: "middle", size: 11, attrs: { style: "fill:var(--text);font-weight:600" } }));
+      svg.appendChild(textNode(gx, h - 6, d.month, { anchor: "middle", size: 11 }));
+    });
+    svg.appendChild(el("line", { x1: padL, x2: w - padR, y1: padT + plotH, y2: padT + plotH, style: "stroke:var(--border-strong)", "stroke-width": 1 }));
+    document.getElementById("chart-overtime").appendChild(svg);
+    const note = document.createElement("div");
+    note.style.cssText = "font-size:11px;color:var(--text-muted);margin-top:6px";
+    note.textContent = "*junio: datos desde el día 16 · septiembre: datos hasta el día 14 (meses parciales)";
+    document.getElementById("chart-overtime").appendChild(note);
+  })();
+})();
+</script>

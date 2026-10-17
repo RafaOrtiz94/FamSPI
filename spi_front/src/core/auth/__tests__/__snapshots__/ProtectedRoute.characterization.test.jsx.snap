@@ -1,0 +1,23 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`RoleRedirect: panel de inicio por rol cada rol real cae en su panel 1`] = `
+Object {
+  "acp_comercial": "/dashboard/comercial",
+  "comercial": "/dashboard/comercial",
+  "financiero": "/dashboard/finanzas",
+  "gerencia_general": "/dashboard/gerencia",
+  "ing_servicio": "/dashboard/servicio-tecnico",
+  "ing_servicio_ext": "/dashboard/ext",
+  "jefe_calidad": "/dashboard/calidad",
+  "jefe_comercial": "/dashboard/comercial",
+  "jefe_financiero": "/dashboard/finanzas",
+  "jefe_logistica": "/dashboard/logistica",
+  "jefe_operaciones": "/dashboard/operaciones",
+  "jefe_servicio": "/dashboard/servicio-tecnico",
+  "jefe_ti": "/dashboard/ti",
+  "logistica": "/dashboard/logistica",
+  "operaciones": "/dashboard/operaciones",
+  "pasante": "/dashboard/pasante",
+  "talento_humano": "/dashboard/talento-humano",
+}
+`;

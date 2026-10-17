@@ -1,0 +1,4 @@
+interface:
+  display_name: "BC Cálculos y Precios"
+  short_description: "Audita y reconstruye precios de hojas BC"
+  default_prompt: "Usa $bc-calculos-pricing-audit para auditar las fórmulas y reconstruir los precios faltantes de los libros de cálculo del Business Case sin inventar datos."

@@ -13,8 +13,9 @@ export const getPendingApprovals = async () => {
  return Array.isArray(rows) ? rows : { rows: Array.isArray(rows?.rows) ? rows.rows : [] };
 };
 
-export const approveRequest = async (id, note = "") => {
- const { data } = await api.post(`/approvals/${id}/approve`, { note });
+export const approveRequest = async (id, options = {}) => {
+ const payload = typeof options === "string" ? { note: options } : options;
+ const { data } = await api.post(`/approvals/${id}/approve`, payload);
  return data.result || data;
 };
 

@@ -1,4 +1,5 @@
 const service = require("./notifications.service");
+const pushSubscriptionsService = require("./pushSubscriptions.service");
 
 const PRIVILEGED_NOTIFICATION_TARGET_ROLES = new Set([
   "ti",
@@ -44,10 +45,12 @@ const canTargetOtherUsers = (user = {}) => {
 
 const list = async (req, res) => {
   try {
+    const includeCleared = req.query.include_cleared === "true" || req.query.include_cleared === "1";
     const notifications = await service.listNotifications(req.user.id, {
       status: req.query.status,
+      includeCleared,
     });
-    const unread = await service.getUnreadCount(req.user.id);
+    const unread = notifications.filter((n) => n.status !== "read" && !n.cleared_at).length;
 
     return res.status(200).json({ ok: true, data: notifications, unread });
   } catch (err) {
@@ -132,6 +135,85 @@ const clear = async (req, res) => {
   }
 };
 
+const getPushConfig = async (_req, res) => {
+  try {
+    const config = pushSubscriptionsService.getPushConfig();
+    return res.status(200).json({ ok: true, data: config });
+  } catch (err) {
+    console.error("Error obteniendo configuracion push", err);
+    return res.status(500).json({
+      ok: false,
+      message: "No se pudo obtener la configuracion push",
+    });
+  }
+};
+
+const getPushStatus = async (req, res) => {
+  try {
+    const status = await pushSubscriptionsService.getUserPushStatus(req.user.id);
+    return res.status(200).json({ ok: true, data: status });
+  } catch (err) {
+    console.error("Error obteniendo estado push", err);
+    return res.status(500).json({
+      ok: false,
+      message: "No se pudo obtener el estado de notificaciones push",
+    });
+  }
+};
+
+const subscribePush = async (req, res) => {
+  try {
+    const config = pushSubscriptionsService.getPushConfig();
+    if (!config.enabled || !config.publicKey) {
+      return res.status(503).json({
+        ok: false,
+        message: "Push web no configurado en este ambiente",
+      });
+    }
+
+    const row = await pushSubscriptionsService.upsertSubscription({
+      userId: req.user.id,
+      subscription: req.body?.subscription,
+      userAgent: req.get("user-agent") || null,
+      deviceLabel: req.body?.device_label || null,
+      appPath: req.get("x-app-path") || null,
+    });
+
+    return res.status(201).json({ ok: true, data: row });
+  } catch (err) {
+    console.error("Error registrando suscripcion push", err);
+    return res.status(400).json({
+      ok: false,
+      message: err.message || "No se pudo registrar la suscripcion push",
+    });
+  }
+};
+
+const unsubscribePush = async (req, res) => {
+  try {
+    const endpoint = req.body?.endpoint;
+    if (!endpoint) {
+      return res.status(400).json({
+        ok: false,
+        message: "endpoint es requerido",
+      });
+    }
+
+    const row = await pushSubscriptionsService.disableSubscription({
+      userId: req.user.id,
+      endpoint,
+    });
+
+    return res.status(200).json({ ok: true, data: row });
+  } catch (err) {
+    console.error("Error deshabilitando suscripcion push", err);
+    return res.status(500).json({
+      ok: false,
+      message: "No se pudo deshabilitar la suscripcion push",
+    });
+  }
+};
+
 module.exports = {
   list,
   create,
@@ -139,4 +221,8 @@ module.exports = {
   markAll,
   remove,
   clear,
+  getPushConfig,
+  getPushStatus,
+  subscribePush,
+  unsubscribePush,
 };

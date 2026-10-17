@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { FiUserPlus, FiFileText, FiCheckCircle, FiAlertCircle, FiClock, FiXCircle, FiEdit2, FiRefreshCw } from "react-icons/fi";
+import { FiUserPlus, FiCheckCircle, FiAlertCircle, FiClock, FiXCircle, FiEdit2 } from "react-icons/fi";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import Modal from "../components/Modal";

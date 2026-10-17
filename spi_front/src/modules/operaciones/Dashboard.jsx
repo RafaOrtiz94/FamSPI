@@ -18,6 +18,8 @@ import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatu
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
+import DispatchWorkspaceWidget from "./components/DispatchWorkspaceWidget";
+import BusinessCasePendingWidget from "../../core/ui/widgets/BusinessCasePendingWidget";
 
 const unwrapRows = (payload) =>
  payload?.rows || payload?.result?.rows || payload?.result || payload || [];
@@ -121,6 +123,10 @@ const DashboardOperaciones = () => {
  }
  />
 
+ <div className="mb-6">
+ <BusinessCasePendingWidget />
+ </div>
+
  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
  <StatCard
  icon={FiClipboard}
@@ -151,6 +157,8 @@ const DashboardOperaciones = () => {
  <div className="grid grid-cols-1 gap-4">
  <ClientRequestWidget />
  </div>
+
+ <DispatchWorkspaceWidget />
 
  <PermisosStatusWidget />
 

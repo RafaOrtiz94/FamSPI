@@ -1,0 +1,11 @@
+[
+  {
+    "rows": [
+      [{"name":"firstName"}, {"name":"lastName"}],
+      [{"name":"account"}, {"name":"emailAddress"}],
+      [{"name":"addressCity"}, {"name":"addressState"}],
+      [{"name":"cFamspiId"}, {"name":"cBuyingRole"}],
+      [{"name":"cInfluenceLevel"}, false]
+    ]
+  }
+]

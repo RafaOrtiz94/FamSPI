@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
  FiBell,
  FiCheckCircle,
@@ -11,8 +11,10 @@ import {
  FiPackage,
  FiCalendar,
  FiFileText,
+ FiArrowRight,
 } from "react-icons/fi";
 import { useNotifications } from "../NotificationContext";
+import { getNotificationCtaLabel, resolveNotificationTargetPath } from "../notificationTarget";
 
 const typeIcon = {
  alert: <FiAlertTriangle className="text-amber-500" />,
@@ -75,8 +77,7 @@ export default function NotificationBell() {
  const [open, setOpen] = useState(false);
  const containerRef = useRef(null);
  const navigate = useNavigate();
- const location = useLocation();
- const containerClassName = "fixed bottom-4 right-4 z-[60] sm:bottom-6 sm:right-6";
+ const containerClassName = "fixed bottom-20 right-4 z-[90] sm:bottom-24 sm:right-6 md:bottom-6";
 
  useEffect(() => {
  if (!open) return undefined;
@@ -108,51 +109,7 @@ export default function NotificationBell() {
  return sorted.slice(0, 6);
  }, [notifications]);
 
- const resolvePrivatePurchaseBasePath = () => {
- const pathname = String(location?.pathname || "").toLowerCase();
- if (pathname.includes("/dashboard/logistica/")) return "/dashboard/logistica/private-purchases";
- if (pathname.includes("/dashboard/operaciones/")) return "/dashboard/operaciones/private-purchases";
- return "/dashboard/backoffice/private-purchases";
- };
-
- const resolveFallbackTargetPath = (notification) => {
- const source = normalizeSource(notification?.source);
- const purchaseId = getMetaValue(notification, ["purchase_id", "purchaseId"]);
- const publicRequestId = getMetaValue(notification, ["request_id", "requestId"]);
- const solicitudId = getMetaValue(notification, ["solicitud_id", "solicitudId"]);
- const businessCaseId = getMetaValue(notification, ["business_case_id", "businessCaseId", "bc_id", "bcId"]);
-
- if (source.startsWith("private_purchase") && purchaseId) {
- return `${resolvePrivatePurchaseBasePath()}?purchaseId=${purchaseId}`;
- }
-
- if ((source.startsWith("equipment_purchase") || source.startsWith("equipment_purchases")) && publicRequestId) {
- return `/dashboard/comercial/equipment-purchases?requestId=${publicRequestId}`;
- }
-
- if ((source.startsWith("permisos_vacaciones") || source.startsWith("vacaciones")) && solicitudId) {
- return `/dashboard/talento-humano/permisos?solicitudId=${solicitudId}`;
- }
-
- if (source.startsWith("business_case") && businessCaseId) {
- return `/dashboard/business-case/workspace/${businessCaseId}`;
- }
-
- return null;
- };
-
- const resolveTargetPath = (notification) => {
- const metaTargetPath = getMetaValue(notification, [
- "target_path",
- "targetPath",
- "url",
- "path",
- "redirect_to",
- "redirectTo",
- ]);
- if (metaTargetPath) return metaTargetPath;
- return resolveFallbackTargetPath(notification);
- };
+ const resolveTargetPath = resolveNotificationTargetPath;
 
  const handleItemClick = async (notification) => {
  if (!notification) return;
@@ -181,7 +138,7 @@ export default function NotificationBell() {
  </button>
 
  {open && (
- <div className="absolute bottom-[3.75rem] right-0 w-[22rem] bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden">
+ <div className="absolute bottom-[3.75rem] right-0 w-[min(22rem,calc(100vw-1.5rem))] bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden">
  <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
  <div>
  <p className="text-sm font-semibold text-slate-800">Notificaciones</p>
@@ -244,6 +201,19 @@ export default function NotificationBell() {
  <p className="text-xs text-slate-600 line-clamp-2">{notif.message}</p>
  )}
  <p className="text-[11px] text-slate-400 mt-1">{formatDate(notif.created_at)}</p>
+ {resolveTargetPath(notif) && (
+ <button
+ type="button"
+ onClick={(event) => {
+ event.stopPropagation();
+ handleItemClick(notif);
+ }}
+ className="mt-2 inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-slate-700"
+ >
+ {getNotificationCtaLabel(notif)}
+ <FiArrowRight size={12} />
+ </button>
+ )}
  </div>
  <button
  onClick={(event) => {
@@ -262,8 +232,17 @@ export default function NotificationBell() {
  </div>
  ))}
  </div>
- <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 text-[11px] text-slate-500">
- Solo se muestran las 6 notificaciones mas recientes. Se priorizan urgencia alta y fecha reciente.
+ <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-2">
+   <p className="text-[11px] text-slate-500">
+     {notifications.length > 6 ? `${notifications.length - 6} mas sin mostrar` : "Mostrando las mas recientes"}
+   </p>
+   <button
+     type="button"
+     onClick={() => { setOpen(false); navigate("/dashboard/notificaciones"); }}
+     className="cursor-pointer text-[11px] font-semibold text-accent hover:text-accent-dark"
+   >
+     Ver todas →
+   </button>
  </div>
  </div>
  )}

@@ -8,8 +8,10 @@ const PROFILE_SYNC_KEYS = [
   "personal.fecha_nacimiento",
   "domicilio.ciudad_domicilio",
   "domicilio.direccion_domicilio",
+  "domicilio.movilizacion",
   "domicilio.telefono_fijo",
   "emergencia.persona_contacto",
+  "emergencia.parentesco_contacto",
   "emergencia.telefono_contacto",
   "estudios.nivel_instruccion",
   "estudios.titulo_tercer_nivel",
@@ -55,22 +57,52 @@ const collectNestedFields = (source = {}, keys = PROFILE_SYNC_KEYS) => {
   return result;
 };
 
-const applyNestedFields = (target = {}, source = {}, keys = PROFILE_SYNC_KEYS) => {
+const isBlankString = (value) =>
+  typeof value === "string" && value.trim() === "";
+
+const hasPersistedValue = (value) => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim() !== "";
+  return true;
+};
+
+const applyNestedFields = (target = {}, source = {}, keys = PROFILE_SYNC_KEYS, options = {}) => {
   const next = { ...(target || {}) };
   keys.forEach((key) => {
     const path = key.split(".");
     const incoming = getNestedValue(source, path);
     if (incoming !== undefined) {
+      const current = getNestedValue(next, path);
+      if (
+        options.preserveExistingOnBlank === true &&
+        isBlankString(incoming) &&
+        hasPersistedValue(current)
+      ) {
+        return;
+      }
       setNestedValue(next, path, incoming);
     }
   });
   return next;
 };
 
+const PASSIVE_EMPLOYMENT_STATUSES = ["pasivo", "desvinculado", "inactivo", "en_desvinculacion"];
+
+const isPassiveEmploymentStatus = (status) => {
+  return PASSIVE_EMPLOYMENT_STATUSES.includes(String(status || "").trim().toLowerCase());
+};
+
+const shouldSyncUserActiveStatus = (employmentStatus) => {
+  return isPassiveEmploymentStatus(employmentStatus);
+};
+
 module.exports = {
   PROFILE_SYNC_KEYS,
+  PASSIVE_EMPLOYMENT_STATUSES,
   getNestedValue,
   setNestedValue,
   collectNestedFields,
   applyNestedFields,
+  isPassiveEmploymentStatus,
+  shouldSyncUserActiveStatus,
 };

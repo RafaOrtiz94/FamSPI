@@ -1,0 +1,26 @@
+node_modules
+.git
+.gitignore
+.env
+.env.*
+logs
+*.log
+
+# desarrollo
+tests
+__tests__
+scripts
+migrations
+docs
+
+# assets grandes innecesarios
+*.sql
+*.md
+*.pdf
+*.docx
+!src/data/plantillas/*.pdf
+!src/data/plantillas/*.docx
+
+# frontend si existe
+../spi_front
+../frontend

@@ -1,7 +1,7 @@
 param(
     [string]$PythonExe = "C:\Users\Departamento de TI\AppData\Local\Python\pythoncore-3.14-64\python.exe",
     [Alias("Input")]
-    [string]$InputFile = "FORMATO BC - 15-01-2026 (2).xlsx",
+    [string]$InputFile = "FORMATO BC.xlsx",
     [string]$OutDir = $PSScriptRoot,
     [ValidateSet("json", "md", "both")]
     [string]$Format = "both",

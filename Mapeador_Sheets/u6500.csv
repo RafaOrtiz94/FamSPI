@@ -1,0 +1,13 @@
+sheet,cell,row,column,source,target_header,value_state,reason,label,description
+u6500,E9,9,E/5,objective,DET AÑO/PROCESO,empty,target_column_empty,cobas u cuvette (400 pc),"Rellenar columna 'DET AÑO/PROCESO' en u6500!E9 (fila 9, columna E/5). Contexto de fila: 'cobas u cuvette (400 pc)' en B9."
+u6500,E10,10,E/5,objective,DET AÑO/PROCESO,empty,target_column_empty,cobas u pack (400 strips),"Rellenar columna 'DET AÑO/PROCESO' en u6500!E10 (fila 10, columna E/5). Contexto de fila: 'cobas u pack (400 strips)' en B10."
+u6500,E11,11,E/5,objective,DET AÑO/PROCESO,empty,target_column_empty,CONSUMIBLES,"Rellenar columna 'DET AÑO/PROCESO' en u6500!E11 (fila 11, columna E/5). Contexto de fila: 'CONSUMIBLES' en A11."
+u6500,E12,12,E/5,objective,DET AÑO/PROCESO,empty,target_column_empty,12 MESES,"Rellenar columna 'DET AÑO/PROCESO' en u6500!E12 (fila 12, columna E/5). Contexto de fila: '12 MESES' en D12."
+u6500,E13,13,E/5,objective,DET AÑO/PROCESO,empty,target_column_empty,2 MESES,"Rellenar columna 'DET AÑO/PROCESO' en u6500!E13 (fila 13, columna E/5). Contexto de fila: '2 MESES' en D13."
+u6500,E14,14,E/5,objective,DET AÑO/PROCESO,empty,target_column_empty,WASTE BOX CARTON,"Rellenar columna 'DET AÑO/PROCESO' en u6500!E14 (fila 14, columna E/5). Contexto de fila: 'WASTE BOX CARTON' en B14."
+u6500,G9,9,G/7,objective,PRODUCTO A ENTREGAR,empty,target_column_empty,cobas u cuvette (400 pc),"Rellenar columna 'PRODUCTO A ENTREGAR' en u6500!G9 (fila 9, columna G/7). Contexto de fila: 'cobas u cuvette (400 pc)' en B9."
+u6500,G10,10,G/7,objective,PRODUCTO A ENTREGAR,empty,target_column_empty,cobas u pack (400 strips),"Rellenar columna 'PRODUCTO A ENTREGAR' en u6500!G10 (fila 10, columna G/7). Contexto de fila: 'cobas u pack (400 strips)' en B10."
+u6500,G11,11,G/7,objective,PRODUCTO A ENTREGAR,empty,target_column_empty,CONSUMIBLES,"Rellenar columna 'PRODUCTO A ENTREGAR' en u6500!G11 (fila 11, columna G/7). Contexto de fila: 'CONSUMIBLES' en A11."
+u6500,G12,12,G/7,objective,PRODUCTO A ENTREGAR,empty,target_column_empty,12 MESES,"Rellenar columna 'PRODUCTO A ENTREGAR' en u6500!G12 (fila 12, columna G/7). Contexto de fila: '12 MESES' en D12."
+u6500,G13,13,G/7,objective,PRODUCTO A ENTREGAR,empty,target_column_empty,2 MESES,"Rellenar columna 'PRODUCTO A ENTREGAR' en u6500!G13 (fila 13, columna G/7). Contexto de fila: '2 MESES' en D13."
+u6500,G14,14,G/7,objective,PRODUCTO A ENTREGAR,empty,target_column_empty,WASTE BOX CARTON,"Rellenar columna 'PRODUCTO A ENTREGAR' en u6500!G14 (fila 14, columna G/7). Contexto de fila: 'WASTE BOX CARTON' en B14."

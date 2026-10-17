@@ -87,7 +87,7 @@ const PersonnelRequestReview = ({
  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
  <div>
- <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Estado operativo</p>
+ <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Estado operativo de la solicitud</p>
  <p className="text-sm font-semibold text-slate-900">{request.workflow.current_stage_label}</p>
  </div>
  <div className="text-sm text-slate-700">
@@ -99,21 +99,21 @@ const PersonnelRequestReview = ({
  </div>
  <div className="mt-3 grid gap-3 text-xs text-slate-700 sm:grid-cols-2 xl:grid-cols-4">
  <div className="rounded-xl bg-white px-3 py-3">
- <p className="font-semibold text-slate-500">Siguiente acción</p>
+ <p className="font-semibold text-slate-500">Siguiente acción requerida</p>
  <p className="mt-1 text-sm font-medium text-slate-900">{request.workflow.next_action || "Sin acción pendiente"}</p>
  </div>
  <div className="rounded-xl bg-white px-3 py-3">
- <p className="font-semibold text-slate-500">Tiempo en etapa</p>
+ <p className="font-semibold text-slate-500">Tiempo acumulado en la etapa</p>
  <p className="mt-1 text-sm font-medium text-slate-900">{request.workflow.elapsed_label || "N/A"}</p>
  </div>
  <div className="rounded-xl bg-white px-3 py-3">
- <p className="font-semibold text-slate-500">Fecha límite</p>
+ <p className="font-semibold text-slate-500">Fecha límite comprometida</p>
  <p className="mt-1 text-sm font-medium text-slate-900">
  {request.workflow.deadline_at ? formatDateSafe(request.workflow.deadline_at, "dd/MM/yyyy") : "Sin límite"}
  </p>
  </div>
  <div className="rounded-xl bg-white px-3 py-3">
- <p className="font-semibold text-slate-500">Estado de etapa</p>
+ <p className="font-semibold text-slate-500">Estado real de la etapa</p>
  <p className={`mt-1 text-sm font-medium ${request.workflow.stalled ? "text-rose-700" : "text-emerald-700"}`}>
  {request.workflow.stalled ? `Estancada ${request.workflow.stalled_for_label || ""}`.trim() : "En curso"}
  </p>
@@ -150,44 +150,33 @@ const PersonnelRequestReview = ({
  </div>
 
  <div>
- <h3 className="font-medium text-gray-900 mb-2">Justificación</h3>
+ <h3 className="font-medium text-gray-900 mb-2">Justificación de la solicitud</h3>
  <div className="bg-gray-50 p-4 rounded-md text-sm text-gray-700 whitespace-pre-wrap">
- {request.justification || "Sin justificación"}
+ {request.justification || "La solicitud no registra una justificación detallada."}
  </div>
  </div>
 
  <div>
- <h3 className="font-medium text-gray-900 mb-2">Condiciones Laborales</h3>
- <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-50 p-4 rounded-md text-sm text-gray-700">
- <div>
- <span className="font-medium">Horario:</span> {request.work_schedule || "N/A"}
- </div>
- <div>
- <span className="font-medium">Rango Salarial:</span> {request.salary_range || "N/A"}
- </div>
- <div>
- <span className="font-medium">Ubicación:</span> {request.work_location || "N/A"}
- </div>
- <div>
- <span className="font-medium">Beneficios:</span> {request.benefits || "N/A"}
- </div>
+ <h3 className="font-medium text-gray-900 mb-2">Sitio a laborar</h3>
+ <div className="bg-gray-50 p-4 rounded-md text-sm text-gray-700">
+ <span className="font-medium">Ciudad:</span> {request.work_location || "N/A"}
  </div>
  </div>
 
  {canApprove && (request.status === "pendiente" || request.status === "en_revision") && (
  <div className="border-t border-gray-200 pt-6">
- <h3 className="font-medium text-gray-900 mb-4">Dictamen de Gerencia</h3>
+ <h3 className="font-medium text-gray-900 mb-4">Dictamen formal de Gerencia</h3>
  <div className="space-y-4">
  <div>
  <label className="block text-sm font-medium text-gray-700 mb-1">
- Notas / Motivo
+ Observaciones de aprobación o motivo de rechazo
  </label>
  <textarea
  className="w-full rounded-md border border-gray-300 p-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
  rows={3}
  value={actionNotes}
  onChange={(e) => setActionNotes(e.target.value)}
- placeholder="Agrega notas para la aprobación o el motivo del rechazo"
+ placeholder="Detalla la observacion que respalda la aprobacion o explica el motivo del rechazo"
  />
  </div>
  <div className="flex justify-end gap-3">

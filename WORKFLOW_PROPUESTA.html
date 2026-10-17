@@ -1,0 +1,1326 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FamSPI — Plan de Implementación: Workspace Unificado de Compras</title>
+<style>
+  :root {
+    --naval:   #1E293B;
+    --storm:   #334155;
+    --mid:     #475569;
+    --ash:     #6B7280;
+    --fog:     #D1D5DB;
+    --border:  #E5E7EB;
+    --paper:   #F9FAFB;
+    --white:   #FFFFFF;
+    --blue:    #2563EB;
+    --blue-dk: #1D4ED8;
+    --blue-lt: #DBEAFE;
+    --blue-tx: #1E3A8A;
+    --green:   #16A34A;
+    --green-lt:#DCFCE7;
+    --green-tx:#14532D;
+    --amber:   #D97706;
+    --amber-lt:#FEF3C7;
+    --amber-tx:#78350F;
+    --red:     #DC2626;
+    --red-lt:  #FEE2E2;
+    --red-tx:  #7F1D1D;
+    --purple:  #7C3AED;
+    --purple-lt:#F3E8FF;
+    --purple-tx:#4C1D95;
+    --indigo:  #4338CA;
+    --indigo-lt:#E0E7FF;
+    --indigo-tx:#312E81;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    background: var(--paper);
+    color: #1F2937;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--naval);
+    color: var(--white);
+    padding: 18px 40px;
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+  }
+  header h1 { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.01em; }
+  header span { color: #94A3B8; font-size: 0.8rem; }
+
+  /* ── Tab bar ── */
+  .tabs {
+    display: flex;
+    gap: 2px;
+    background: #E2E8F0;
+    padding: 8px 40px 0;
+    overflow-x: auto;
+  }
+  .tab-btn {
+    padding: 9px 16px;
+    border: none;
+    background: transparent;
+    color: #64748B;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    white-space: nowrap;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .tab-btn:hover { background: #F1F5F9; color: #334155; }
+  .tab-btn.active { background: var(--white); color: #0F172A; }
+  .tab-btn .pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    font-size: 0.65rem;
+    background: #E2E8F0;
+    color: #64748B;
+  }
+  .tab-btn.active .pill { background: var(--naval); color: white; }
+
+  /* ── Content ── */
+  .content { padding: 32px 40px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── Typography ── */
+  .section-title {
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+    color: #0F172A;
+  }
+  .section-desc {
+    font-size: 0.8rem;
+    color: var(--ash);
+    margin-bottom: 28px;
+    line-height: 1.5;
+  }
+
+  h3 {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--mid);
+    margin: 32px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h3:first-of-type { margin-top: 0; }
+
+  h4 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #0F172A;
+    margin: 20px 0 8px;
+  }
+
+  /* ── Badges ── */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 10px;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge-blue   { background: var(--blue-lt);   color: var(--blue-tx); }
+  .badge-green  { background: var(--green-lt);  color: var(--green-tx); }
+  .badge-amber  { background: var(--amber-lt);  color: var(--amber-tx); }
+  .badge-red    { background: var(--red-lt);    color: var(--red-tx); }
+  .badge-navy   { background: #E2E8F0;          color: var(--naval); }
+  .badge-purple { background: var(--purple-lt); color: var(--purple-tx); }
+  .badge-indigo { background: var(--indigo-lt); color: var(--indigo-tx); }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+  }
+  .card + .card { margin-top: 12px; }
+
+  /* ── Grid helpers ── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) {
+    .grid-2, .grid-3 { grid-template-columns: 1fr; }
+    .content { padding: 24px 20px; }
+    header, .tabs { padding-left: 20px; padding-right: 20px; }
+  }
+
+  /* ── Tables ── */
+  .table-wrap { overflow-x: auto; border-radius: 12px; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th {
+    background: var(--paper);
+    padding: 10px 14px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--mid);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    color: #1F2937;
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--paper); }
+  code {
+    font-family: 'Geist Mono', 'SF Mono', ui-monospace, monospace;
+    font-size: 0.75rem;
+    background: #F3F4F6;
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: #374151;
+  }
+
+  /* ── CHG items ── */
+  .chg-item {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 10px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 14px;
+    align-items: start;
+  }
+  .chg-num {
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--ash);
+    background: var(--paper);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 8px;
+    white-space: nowrap;
+  }
+  .chg-content h4 { margin: 0 0 4px; font-size: 0.85rem; }
+  .chg-content p { font-size: 0.78rem; color: var(--ash); margin: 0; line-height: 1.5; }
+  .chg-content ul { margin: 6px 0 0 16px; font-size: 0.78rem; color: var(--mid); }
+  .chg-content ul li { margin-bottom: 2px; }
+  .chg-meta { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+
+  /* ── Component tree ── */
+  .tree {
+    font-family: 'Geist Mono', ui-monospace, monospace;
+    font-size: 0.75rem;
+    line-height: 1.7;
+    background: #0F172A;
+    color: #CBD5E1;
+    border-radius: 12px;
+    padding: 20px 24px;
+    overflow-x: auto;
+  }
+  .tree .dir  { color: #60A5FA; }
+  .tree .file { color: #A3E635; }
+  .tree .note { color: #6B7280; font-style: italic; }
+  .tree .new  { color: #34D399; }
+
+  /* ── Phase block ── */
+  .phase {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    margin-bottom: 16px;
+  }
+  .phase-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--paper);
+  }
+  .phase-num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.75rem; font-weight: 700;
+    background: var(--naval); color: white;
+    flex-shrink: 0;
+  }
+  .phase-header h4 { margin: 0; font-size: 0.9rem; }
+  .phase-header .badge { margin-left: auto; }
+  .phase-body { padding: 16px 20px; }
+
+  /* ── State flow ── */
+  .state-flow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin: 8px 0;
+  }
+  .state-pill {
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    border: 1px solid currentColor;
+  }
+  .arrow { color: var(--ash); font-size: 0.75rem; }
+
+  /* ── Comparison ── */
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin: 16px 0;
+  }
+  @media (max-width: 700px) { .compare-grid { grid-template-columns: 1fr; } }
+  .compare-card {
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid var(--border);
+  }
+  .compare-card.before { background: #FFF7ED; border-color: #FED7AA; }
+  .compare-card.after  { background: #ECFDF5; border-color: #A7F3D0; }
+  .compare-card h4 { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 10px; }
+  .compare-card.before h4 { color: #9A3412; }
+  .compare-card.after h4  { color: #065F46; }
+  .compare-card ul { margin-left: 16px; font-size: 0.78rem; line-height: 1.7; color: var(--mid); }
+
+  /* ── Sub-tab preview ── */
+  .subtab-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-top: 12px;
+  }
+  @media (max-width: 900px) { .subtab-grid { grid-template-columns: 1fr 1fr; } }
+  .subtab-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .subtab-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  .subtab-icon {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+  }
+  .subtab-card h4 { font-size: 0.82rem; margin: 0; }
+  .subtab-card ul { margin-left: 14px; font-size: 0.75rem; color: var(--ash); line-height: 1.7; }
+  .subtab-card .roles { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+
+  /* ── Migration step ── */
+  .migration-step {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .migration-step:last-child { border-bottom: none; }
+  .step-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    margin-top: 6px;
+  }
+
+  /* ── Design token row ── */
+  .token-row { display: flex; align-items: center; gap: 12px; padding: 6px 0; }
+  .token-swatch { width: 24px; height: 24px; border-radius: 6px; border: 1px solid var(--border); flex-shrink: 0; }
+  .token-name { font-family: monospace; font-size: 0.75rem; color: var(--mid); }
+  .token-hex  { font-family: monospace; font-size: 0.72rem; color: var(--ash); }
+
+  /* ── Rule row ── */
+  .rule { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.8rem; display: flex; gap: 10px; }
+  .rule:last-child { border-bottom: none; }
+  .rule-icon { flex-shrink: 0; }
+
+  /* ── Info box ── */
+  .info-box {
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    margin: 12px 0;
+    border: 1px solid;
+  }
+  .info-box.blue   { background: var(--blue-lt);   border-color: #BFDBFE; color: var(--blue-tx); }
+  .info-box.amber  { background: var(--amber-lt);  border-color: #FDE68A; color: var(--amber-tx); }
+  .info-box.green  { background: var(--green-lt);  border-color: #A7F3D0; color: var(--green-tx); }
+  .info-box strong { font-weight: 700; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>FamSPI — Workspace Unificado de Compras</h1>
+  <span>Plan de implementación: Backend + DB, Frontend, Checklist de cambios</span>
+</header>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab(0)"><span class="pill">1</span>Propuesta</button>
+  <button class="tab-btn" onclick="showTab(1)"><span class="pill">2</span>Backend + DB</button>
+  <button class="tab-btn" onclick="showTab(2)"><span class="pill">3</span>Frontend + UI</button>
+  <button class="tab-btn" onclick="showTab(3)"><span class="pill">4</span>CHG Checklist</button>
+  <button class="tab-btn" onclick="showTab(4)"><span class="pill">5</span>Design System</button>
+</div>
+
+<div class="content">
+
+<!-- ═══════════════════════════════════════════
+     TAB 1: PROPUESTA
+════════════════════════════════════════════ -->
+<div class="panel active" id="tab-0">
+  <p class="section-title">Diagnóstico y propuesta — Workspace unificado</p>
+  <p class="section-desc">El ciclo de compras está hoy fragmentado en 11 rutas y workspaces. Un mismo expediente cambia de pantalla según el rol, rompiendo la trazabilidad. La state machine ya es sólida en backend; la fragmentación es puramente de navegación y UI.</p>
+
+  <h3>Estado actual vs. propuesto</h3>
+  <div class="compare-grid">
+    <div class="compare-card before">
+      <h4>Hoy: 11 workspaces fragmentados</h4>
+      <ul>
+        <li><code>/comercial/equipment-purchases</code> — compra pública</li>
+        <li><code>/purchases/workspace</code> — listado mixto</li>
+        <li><code>/backoffice/private-purchases</code> — 3 000 líneas</li>
+        <li><code>/logistica/private-purchases</code> — mismos datos, otra pantalla</li>
+        <li><code>/servicio-tecnico/entregas-privadas</code> — post-arrival</li>
+        <li><code>/servicio-tecnico/workspace-procedimiento</code> — F.ST-07/F.ST-20</li>
+        <li><code>/comercial/delivery-ceilings</code> — cupos públicos</li>
+        <li><code>/gerencia/compras-album</code> — álbum gerencia</li>
+        <li><code>/servicio-tecnico/aplicaciones</code> — entrenamiento</li>
+        <li><code>/servicio-tecnico/asistencia</code> — asistencia</li>
+        <li><code>/servicio-tecnico/desinfeccion</code> — F.ST-02</li>
+      </ul>
+    </div>
+    <div class="compare-card after">
+      <h4>Propuesto: 1 workspace, 6 sub-tabs</h4>
+      <ul>
+        <li><code>/dashboard/compras</code> — ruta única</li>
+        <li>Sub-tab 1: <strong>Comercial</strong> — oferta, BC, SOCE</li>
+        <li>Sub-tab 2: <strong>Contrato</strong> — docs, firmas, gate</li>
+        <li>Sub-tab 3: <strong>Logística</strong> — despacho, F.ST-14</li>
+        <li>Sub-tab 4: <strong>Técnica</strong> — F.ST-07, F.ST-09, CU, F.ST-10</li>
+        <li>Sub-tab 5: <strong>Entrenamiento</strong> — F.ST-04, F.ST-05, cert.</li>
+        <li>Sub-tab 6: <strong>Timeline</strong> — auditoría, bloqueos</li>
+        <li>Adyacentes independientes siguen en navbar propio (retiros, preventivo, correctivo)</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3>Principios de diseño del workspace</h3>
+  <div class="grid-2">
+    <div class="card">
+      <h4>Todos los roles ven todo el expediente</h4>
+      <p style="font-size:0.8rem;color:var(--ash);margin-top:4px;">La visibilidad no se restringe por rol. Las <strong>acciones</strong> se gatean por rol dentro de cada sub-tab. El comercial puede ver la sub-tab Técnica aunque no pueda actuar en ella.</p>
+    </div>
+    <div class="card">
+      <h4>Sub-tabs con badge de estado</h4>
+      <p style="font-size:0.8rem;color:var(--ash);margin-top:4px;">Cada sub-tab muestra un badge: <span class="badge badge-amber">pendiente</span> <span class="badge badge-blue">en curso</span> <span class="badge badge-red">bloqueado</span> <span class="badge badge-green">completado</span> <span class="badge badge-navy">n/a</span>. De un vistazo se conoce el estado de todo el expediente.</p>
+    </div>
+    <div class="card">
+      <h4>Compra pública y privada, misma estructura</h4>
+      <p style="font-size:0.8rem;color:var(--ash);margin-top:4px;">El workspace es agnóstico al tipo. La sub-tab Comercial muestra la sección SOCE para compras públicas y la sección Business Case para comodato. El resto de sub-tabs es idéntico.</p>
+    </div>
+    <div class="card">
+      <h4>Post-arrival unificado para ambos tipos</h4>
+      <p style="font-size:0.8rem;color:var(--ash);margin-top:4px;">Hoy F.ST-14/F.ST-09/F.ST-10/entrenamiento solo existen en UI para compra privada. Se extiende <code>installationWorkflow</code> para que la compra pública también use el mismo flujo.</p>
+    </div>
+  </div>
+
+  <h3>Sub-tabs: contenido y roles por pestaña</h3>
+  <div class="subtab-grid">
+    <div class="subtab-card">
+      <div class="subtab-card-header">
+        <div class="subtab-icon" style="background:var(--blue-lt);">💼</div>
+        <h4>1. Comercial</h4>
+      </div>
+      <ul>
+        <li>Business Case (comodato / pública)</li>
+        <li>Pista SOCE (pública): convocatoria, puja, adjudicación</li>
+        <li>Oferta al cliente (privada)</li>
+        <li>Proforma interna, reserva proveedor</li>
+      </ul>
+      <div class="roles">
+        <span class="badge badge-navy">comercial</span>
+        <span class="badge badge-navy">acp</span>
+        <span class="badge badge-navy">backoffice</span>
+        <span class="badge badge-navy">jefe_comercial</span>
+        <span class="badge badge-navy">gerencia</span>
+      </div>
+    </div>
+    <div class="subtab-card">
+      <div class="subtab-card-header">
+        <div class="subtab-icon" style="background:var(--indigo-lt);">📋</div>
+        <h4>2. Contrato</h4>
+      </div>
+      <ul>
+        <li>Gate documental de gerencia (9 docs)</li>
+        <li>Firma cliente + firma gerencia</li>
+        <li>Orden de Compra / contrato SOCE</li>
+        <li>Registro cliente F.ST-22</li>
+      </ul>
+      <div class="roles">
+        <span class="badge badge-navy">backoffice</span>
+        <span class="badge badge-navy">gerencia</span>
+        <span class="badge badge-navy">cliente</span>
+        <span class="badge badge-navy">acp</span>
+      </div>
+    </div>
+    <div class="subtab-card">
+      <div class="subtab-card-header">
+        <div class="subtab-icon" style="background:var(--amber-lt);">📦</div>
+        <h4>3. Logística</h4>
+      </div>
+      <ul>
+        <li>Solicitud de fechas + Google Calendar</li>
+        <li>Despacho y validación de guía</li>
+        <li>F.ST-14 recepción visual</li>
+        <li>Confirmación de llegada a bodega</li>
+      </ul>
+      <div class="roles">
+        <span class="badge badge-navy">jefe_operaciones</span>
+        <span class="badge badge-navy">logistica</span>
+        <span class="badge badge-navy">bodega</span>
+      </div>
+    </div>
+    <div class="subtab-card">
+      <div class="subtab-card-header">
+        <div class="subtab-icon" style="background:var(--red-lt);">🔧</div>
+        <h4>4. Técnica</h4>
+      </div>
+      <ul>
+        <li>F.ST-07 inspección de sitio</li>
+        <li>F.ST-09 decisión verificación / CU</li>
+        <li>Flujo CU: partes, reparación, F.ST-02</li>
+        <li>F.ST-10 acta de entrega (3 firmas)</li>
+      </ul>
+      <div class="roles">
+        <span class="badge badge-navy">jefe_tecnico</span>
+        <span class="badge badge-navy">tecnico</span>
+        <span class="badge badge-navy">logistica</span>
+        <span class="badge badge-navy">gerencia</span>
+      </div>
+    </div>
+    <div class="subtab-card">
+      <div class="subtab-card-header">
+        <div class="subtab-icon" style="background:var(--green-lt);">🎓</div>
+        <h4>5. Entrenamiento</h4>
+      </div>
+      <ul>
+        <li>F.ST-04 planificación</li>
+        <li>F.ST-05 asistencia (hasta 7 personas)</li>
+        <li>Conformidad y evaluación</li>
+        <li>Certificado de entrenamiento</li>
+      </ul>
+      <div class="roles">
+        <span class="badge badge-navy">jefe_tecnico</span>
+        <span class="badge badge-navy">tecnico</span>
+      </div>
+    </div>
+    <div class="subtab-card">
+      <div class="subtab-card-header">
+        <div class="subtab-icon" style="background:#F3F4F6;">🕐</div>
+        <h4>6. Timeline</h4>
+      </div>
+      <ul>
+        <li>Historial de cambios de estado</li>
+        <li>Documentos subidos con fecha</li>
+        <li>Bloqueos activos y resueltos</li>
+        <li>Eventos de Google Calendar</li>
+      </ul>
+      <div class="roles">
+        <span class="badge badge-navy">todos los roles</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>Navbar: limpieza de rutas</h3>
+  <div class="grid-2">
+    <div>
+      <h4 style="margin-bottom:8px;color:var(--red);">Eliminar del navbar</h4>
+      <div class="migration-step"><div class="step-dot" style="background:var(--red);"></div><div><code>Compras privadas</code> (backoffice y logística)</div></div>
+      <div class="migration-step"><div class="step-dot" style="background:var(--red);"></div><div><code>Compras públicas</code> standalone (comercial)</div></div>
+      <div class="migration-step"><div class="step-dot" style="background:var(--red);"></div><div><code>Entregas privadas</code> (servicio técnico)</div></div>
+      <div class="migration-step"><div class="step-dot" style="background:var(--red);"></div><div><code>Workspace procedimiento</code> (técnico)</div></div>
+      <div class="migration-step"><div class="step-dot" style="background:var(--red);"></div><div><code>Entrenamiento / Asistencia</code> como rutas primarias (se mantienen solo como vistas globales)</div></div>
+    </div>
+    <div>
+      <h4 style="margin-bottom:8px;color:var(--green);">Conservar en navbar</h4>
+      <div class="migration-step"><div class="step-dot" style="background:var(--green);"></div><div><strong>Workspace de Compras</strong> — ruta unificada (todos los roles)</div></div>
+      <div class="migration-step"><div class="step-dot" style="background:var(--green);"></div><div><strong>Cupos públicos</strong> — solo comercial / jefe_comercial (planificación PAC, no expediente)</div></div>
+      <div class="migration-step"><div class="step-dot" style="background:var(--green);"></div><div><strong>Álbum gerencia</strong> — solo gerencia</div></div>
+      <div class="migration-step"><div class="step-dot" style="background:var(--amber);"></div><div><strong>Retiros, Preventivo, Correctivo</strong> — siguen en navbar técnico (flujos independientes)</div></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     TAB 2: BACKEND + DB
+════════════════════════════════════════════ -->
+<div class="panel" id="tab-1">
+  <p class="section-title">Plan Backend y Base de Datos</p>
+  <p class="section-desc">Los cambios de backend son acotados: la state machine privada y el STATUS público quedan intactos. Los trabajos principales son: nuevos campos SERCOP, extender installationWorkflow a compra pública, y consolidar endpoints para el workspace unificado.</p>
+
+  <div class="info-box blue"><strong>Regla de oro:</strong> No se toca la state machine de compra privada ni el STATUS dictionary de compra pública. Solo se agregan campos, se extiende installationWorkflow, y se crean/ajustan endpoints que el frontend necesita para el workspace unificado.</div>
+
+  <h3>Fase B-1 — Migración de base de datos</h3>
+
+  <h4>B-1.1 Nuevos campos SERCOP en <code>equipment_purchase_requests</code></h4>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Prioridad</th></tr></thead>
+      <tbody>
+        <tr><td><code>procedure_type</code></td><td><code>VARCHAR(50)</code></td><td>SIE / Cotización / Licitación / Menor Cuantía / Catálogo / Régimen Especial</td><td><span class="badge badge-red">Alta</span></td></tr>
+        <tr><td><code>soce_process_code</code></td><td><code>VARCHAR(100)</code></td><td>Código SOCE del proceso (ej. <code>SIE-HCAM-2025-0042</code>)</td><td><span class="badge badge-red">Alta</span></td></tr>
+        <tr><td><code>entidad_contratante_name</code></td><td><code>VARCHAR(200)</code></td><td>Nombre de la entidad contratante</td><td><span class="badge badge-red">Alta</span></td></tr>
+        <tr><td><code>entidad_contratante_ruc</code></td><td><code>VARCHAR(13)</code></td><td>RUC de la entidad contratante</td><td><span class="badge badge-amber">Media</span></td></tr>
+        <tr><td><code>presupuesto_referencial</code></td><td><code>DECIMAL(15,2)</code></td><td>Monto máximo publicado en la convocatoria</td><td><span class="badge badge-red">Alta</span></td></tr>
+        <tr><td><code>oferta_tecnica_submitted_at</code></td><td><code>TIMESTAMPTZ</code></td><td>Fecha de presentación de oferta técnica en SOCE</td><td><span class="badge badge-amber">Media</span></td></tr>
+        <tr><td><code>puja_date</code></td><td><code>DATE</code></td><td>Fecha de la sesión de puja/subasta</td><td><span class="badge badge-amber">Media</span></td></tr>
+        <tr><td><code>puja_final_price</code></td><td><code>DECIMAL(15,2)</code></td><td>Precio final ganador de la puja</td><td><span class="badge badge-red">Alta</span></td></tr>
+        <tr><td><code>adjudicacion_resolution_number</code></td><td><code>VARCHAR(100)</code></td><td>Número de la Resolución de Adjudicación</td><td><span class="badge badge-red">Alta</span></td></tr>
+        <tr><td><code>adjudicacion_resolution_date</code></td><td><code>DATE</code></td><td>Fecha de la resolución</td><td><span class="badge badge-red">Alta</span></td></tr>
+        <tr><td><code>adjudicacion_resolution_file_id</code></td><td><code>VARCHAR(255)</code></td><td>ID del archivo en Drive</td><td><span class="badge badge-red">Alta</span></td></tr>
+        <tr><td><code>orden_compra_number</code></td><td><code>VARCHAR(100)</code></td><td>Número de Orden de Compra emitida por SOCE</td><td><span class="badge badge-red">Alta</span></td></tr>
+        <tr><td><code>garantia_fiel_cumplimiento_submitted</code></td><td><code>BOOLEAN DEFAULT FALSE</code></td><td>Garantía de Fiel Cumplimiento entregada</td><td><span class="badge badge-amber">Media</span></td></tr>
+        <tr><td><code>acta_recepcion_provisional_date</code></td><td><code>DATE</code></td><td>Fecha Acta Recepción Provisional de la entidad</td><td><span class="badge badge-amber">Media</span></td></tr>
+        <tr><td><code>pac_code</code></td><td><code>VARCHAR(100)</code></td><td>Código del ítem en el PAC de la entidad</td><td><span class="badge badge-navy">Baja</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="info-box amber" style="margin-top:12px;"><strong>Nombre de migración sugerido:</strong> <code>migration_XXX_add_sercop_fields_to_equipment_purchases.js</code> — usar el siguiente número secuencial disponible en <code>backend/src/database/migrations/</code>.</div>
+
+  <h4 style="margin-top:20px;">B-1.2 Extender <code>equipment_purchase_requests</code> con <code>installationWorkflow</code></h4>
+  <p style="font-size:0.8rem;color:var(--ash);margin-bottom:10px;">Hoy el JSONB <code>installation_workflow</code> solo existe en <code>private_purchases</code>. Se agrega a <code>equipment_purchase_requests</code> para que el post-arrival (F.ST-14, F.ST-09, F.ST-10, entrenamiento) también funcione para compras públicas.</p>
+  <div class="tree">
+<span class="note">-- Agregar columna a tabla existente</span>
+<span class="new">ALTER TABLE equipment_purchase_requests</span>
+<span class="new">  ADD COLUMN IF NOT EXISTS installation_workflow JSONB DEFAULT '{}'::jsonb;</span>
+
+<span class="note">-- Índice GIN para queries sobre el JSONB</span>
+<span class="new">CREATE INDEX IF NOT EXISTS idx_epr_installation_workflow</span>
+<span class="new">  ON equipment_purchase_requests USING GIN (installation_workflow);</span>
+  </div>
+
+  <h3>Fase B-2 — Servicio / Lógica de negocio</h3>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">1</div>
+      <h4>Conectar installationWorkflow al modelo público</h4>
+      <span class="badge badge-red">Crítico</span>
+    </div>
+    <div class="phase-body">
+      <p style="font-size:0.8rem;color:var(--ash);">Archivo: <code>backend/src/modules/servicio/installationWorkflow.service.js</code></p>
+      <ul style="margin:8px 0 0 16px;font-size:0.78rem;color:var(--mid);">
+        <li>Agregar soporte para <code>sourceType: 'public'</code> junto al ya existente <code>'private'</code>.</li>
+        <li>El servicio debe resolver el modelo correcto según <code>sourceType</code> y actualizar <code>installation_workflow</code> en la tabla correspondiente.</li>
+        <li>Mantener la firma de función igual para no romper el uso en compra privada.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">2</div>
+      <h4>Endpoint unificado de listado para el workspace</h4>
+      <span class="badge badge-amber">Importante</span>
+    </div>
+    <div class="phase-body">
+      <p style="font-size:0.8rem;color:var(--ash);">El workspace unificado necesita un solo endpoint que devuelva tanto compras públicas como privadas filtradas, con el estado de instalación y bloqueos.</p>
+      <div class="tree" style="margin-top:10px;">
+<span class="new">GET /api/purchases/workspace</span>
+<span class="note">Query params: type (public|private|all), status, responsible, client_id, page, pageSize</span>
+
+<span class="note">Response shape:</span>
+{
+  data: [
+    {
+      <span class="file">id</span>, <span class="file">type</span>: 'public'|'private',
+      <span class="file">purchase_type</span>: 'direct_purchase'|'rental'|'comodato'|'public',
+      <span class="file">status</span>, <span class="file">client</span>, <span class="file">equipment</span>,
+      <span class="file">active_blockers</span>: string[],
+      <span class="file">tab_states</span>: { comercial, contrato, logistica, tecnica, entrenamiento },
+      <span class="file">installation_workflow</span>: { ... }
+    }
+  ],
+  meta: { total, page, pageSize }
+}
+      </div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">3</div>
+      <h4>Endpoint de detalle unificado</h4>
+      <span class="badge badge-amber">Importante</span>
+    </div>
+    <div class="phase-body">
+      <div class="tree">
+<span class="new">GET /api/purchases/workspace/:id?type=public|private</span>
+<span class="note">Devuelve el expediente completo con todas las relaciones necesarias</span>
+<span class="note">para renderizar las 6 sub-tabs sin requests adicionales.</span>
+
+<span class="note">Incluye:</span>
+- business_case (si aplica)
+- soce_fields (si es pública)
+- offer_documents
+- contract_documents + gate_status
+- delivery_dates, dispatch_info
+- installation_workflow (completo)
+- training_workflow
+- audit_log (últimos 50 eventos)
+      </div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">4</div>
+      <h4>Helpers de cálculo de tab_states</h4>
+      <span class="badge badge-navy">Nuevo</span>
+    </div>
+    <div class="phase-body">
+      <p style="font-size:0.8rem;color:var(--ash);">Función que deriva el estado de cada sub-tab a partir del estado principal y el <code>installation_workflow</code>. Se puede calcular en el servicio antes de enviar la respuesta.</p>
+      <div class="tree" style="margin-top:10px;">
+<span class="note">// backend/src/modules/purchases/purchaseTabStates.helper.js</span>
+<span class="new">function computeTabStates(purchase) {</span>
+  <span class="file">return {</span>
+    <span class="file">comercial:    deriveComercialState(purchase),</span>  <span class="note">// 'pending'|'in_progress'|'completed'|'na'</span>
+    <span class="file">contrato:     deriveContratoState(purchase),</span>
+    <span class="file">logistica:    deriveLogisticaState(purchase),</span>
+    <span class="file">tecnica:      deriveTecnicaState(purchase),</span>
+    <span class="file">entrenamiento:deriveEntrenamientoState(purchase),</span>
+  <span class="file">};</span>
+<span class="new">}</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>Fase B-3 — Consolidación modelo entrega pública (decisión pendiente)</h3>
+  <div class="info-box amber">
+    <strong>CHG-08 en espera:</strong> Existen dos modelos paralelos para "entrega pública": las tablas <code>delivery_ceiling</code> / <code>public_delivery_plan</code> (migraciones 126-128) y las columnas <code>equipment_purchase_requests.delivery_*</code> (migración 095). Antes de unificar, confirmar con el equipo cuál es el modelo canónico. No ejecutar hasta que se decida.
+  </div>
+
+  <h3>Fase B-4 — Archivos a eliminar / limpiar</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Acción</th><th>Archivo / Ruta</th><th>Motivo</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge badge-red">Eliminar</span></td><td><code>backend/src/routes/</code> rutas que apuntan a workspaces deprecados</td><td>Se consolidan en el endpoint workspace unificado</td></tr>
+        <tr><td><span class="badge badge-amber">Revisar</span></td><td><code>AppRoutes.jsx:345</code> — ruta TecnicoPrivatePurchases</td><td>Es un Navigate muerto. Eliminar ruta y archivo</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     TAB 3: FRONTEND + UI
+════════════════════════════════════════════ -->
+<div class="panel" id="tab-2">
+  <p class="section-title">Plan Frontend — Workspace Unificado</p>
+  <p class="section-desc">Arquitectura de componentes, estructura de archivos, y reglas de diseño derivadas de DESIGN.md. El workspace usa lista lateral + panel de detalle con 6 sub-tabs. Todos los componentes respetan el Design System naval.</p>
+
+  <div class="info-box blue"><strong>Escena de uso:</strong> Asesor comercial revisando el estado de un expediente de comodato en desktop de oficina, backoffice aprobando un contrato, jefe técnico asignando instalador desde tablet. La interfaz debe ser densa pero legible, con estado y bloqueos visibles sin scroll.</div>
+
+  <h3>Estructura de archivos</h3>
+  <div class="tree">
+<span class="dir">spi_front/src/modules/shared/purchases-workspace/</span>
+  <span class="dir">├── pages/</span>
+  <span class="file">│   └── PurchasesWorkspacePage.jsx          </span><span class="note">  -- root, sustituye a PurchasesWorkspace.jsx</span>
+  <span class="dir">├── components/</span>
+  <span class="dir">│   ├── list/</span>
+  <span class="file">│   │   ├── PurchaseListPanel.jsx</span>
+  <span class="file">│   │   ├── PurchaseFilterBar.jsx</span>
+  <span class="file">│   │   └── PurchaseListItem.jsx</span>
+  <span class="dir">│   ├── detail/</span>
+  <span class="file">│   │   ├── PurchaseDetailPanel.jsx</span>
+  <span class="file">│   │   ├── PurchaseDetailHeader.jsx</span>
+  <span class="file">│   │   └── PurchaseTabNav.jsx</span>
+  <span class="dir">│   ├── tabs/</span>
+  <span class="dir">│   │   ├── comercial/</span>
+  <span class="file">│   │   │   ├── ComercialTab.jsx</span>
+  <span class="file">│   │   │   ├── BusinessCaseSection.jsx     </span><span class="note">  -- condicional: comodato/pública</span>
+  <span class="file">│   │   │   ├── SoceTrackSection.jsx        </span><span class="note">  -- condicional: solo pública</span>
+  <span class="file">│   │   │   └── OfferSection.jsx</span>
+  <span class="dir">│   │   ├── contrato/</span>
+  <span class="file">│   │   │   ├── ContratoTab.jsx</span>
+  <span class="file">│   │   │   ├── DocumentGateChecklist.jsx</span>
+  <span class="file">│   │   │   └── ContractSignatureFlow.jsx</span>
+  <span class="dir">│   │   ├── logistica/</span>
+  <span class="file">│   │   │   ├── LogisticaTab.jsx</span>
+  <span class="file">│   │   │   ├── DeliveryDatesSection.jsx</span>
+  <span class="file">│   │   │   └── VisualReceptionSection.jsx  </span><span class="note">  -- F.ST-14</span>
+  <span class="dir">│   │   ├── tecnica/</span>
+  <span class="file">│   │   │   ├── TecnicaTab.jsx</span>
+  <span class="file">│   │   │   ├── SiteInspectionSection.jsx   </span><span class="note">  -- F.ST-07</span>
+  <span class="file">│   │   │   ├── VerificationSection.jsx     </span><span class="note">  -- F.ST-09 + ciclos</span>
+  <span class="file">│   │   │   ├── CUFlowSection.jsx           </span><span class="note">  -- flujo CU condicional</span>
+  <span class="file">│   │   │   ├── DisinfectionSection.jsx     </span><span class="note">  -- F.ST-02</span>
+  <span class="file">│   │   │   └── DeliveryActSection.jsx      </span><span class="note">  -- F.ST-10</span>
+  <span class="dir">│   │   ├── entrenamiento/</span>
+  <span class="file">│   │   │   ├── EntrenamientoTab.jsx</span>
+  <span class="file">│   │   │   ├── TrainingPlanSection.jsx     </span><span class="note">  -- F.ST-04</span>
+  <span class="file">│   │   │   ├── AttendanceSection.jsx       </span><span class="note">  -- F.ST-05</span>
+  <span class="file">│   │   │   └── CertificateSection.jsx</span>
+  <span class="dir">│   │   └── timeline/</span>
+  <span class="file">│   │       ├── TimelineTab.jsx</span>
+  <span class="file">│   │       ├── AuditTimeline.jsx</span>
+  <span class="file">│   │       └── BlockersPanel.jsx</span>
+  <span class="dir">│   └── shared/</span>
+  <span class="file">│       ├── TabStatusBadge.jsx              </span><span class="note">  -- badge pendiente/en curso/bloqueado/completado</span>
+  <span class="file">│       ├── ActionGate.jsx                  </span><span class="note">  -- wrapper que gatilla acción por rol</span>
+  <span class="file">│       └── BlockerAlert.jsx               </span><span class="note">  -- alerta de bloqueo activo con detalle</span>
+  <span class="dir">├── hooks/</span>
+  <span class="file">│   ├── usePurchaseList.js</span>
+  <span class="file">│   ├── usePurchaseDetail.js</span>
+  <span class="file">│   └── usePurchaseActions.js</span>
+  <span class="dir">└── api/</span>
+  <span class="file">    └── purchasesWorkspaceApi.js            </span><span class="note">  -- llama al endpoint /api/purchases/workspace</span>
+  </div>
+
+  <h3>Layout del workspace</h3>
+  <div class="card">
+    <p style="font-size:0.8rem;color:var(--ash);margin-bottom:12px;">El workspace usa una distribución de dos paneles: lista lateral fija (320px) y panel de detalle expandido. En tablet colapsado el panel lista se oculta con un botón de retroceso. En mobile es un listado que navega a la pantalla completa de detalle.</p>
+    <div class="tree">
+<span class="note">// PurchasesWorkspacePage.jsx — layout raíz</span>
+<span class="new">&lt;div className="flex min-w-0 h-[calc(100vh-64px)]"&gt;</span>
+  <span class="file">&lt;PurchaseListPanel              </span><span class="note">  {/* 320px, sticky, overflow-y-auto */}</span>
+    <span class="file">onSelect={setSelectedId}</span>
+    <span class="file">selectedId={selectedId}</span>
+  <span class="file">/&gt;</span>
+  <span class="file">&lt;PurchaseDetailPanel            </span><span class="note">  {/* flex-1, overflow-y-auto */}</span>
+    <span class="file">purchaseId={selectedId}</span>
+  <span class="file">/&gt;</span>
+<span class="new">&lt;/div&gt;</span>
+    </div>
+  </div>
+
+  <h3>Componentes clave: especificaciones de diseño</h3>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">A</div>
+      <h4>PurchaseListItem — estado, tipo y bloqueo visible</h4>
+    </div>
+    <div class="phase-body">
+      <ul style="font-size:0.8rem;color:var(--mid);margin-left:16px;line-height:1.8;">
+        <li>Altura fija <code>72px</code> — nunca variable para mantener scroll predecible.</li>
+        <li>Left: badge de tipo (<span class="badge badge-blue">pública</span> / <span class="badge badge-indigo">comodato</span> / <span class="badge badge-navy">directa</span>) + nombre del cliente en 14px/600.</li>
+        <li>Right: badge de estado principal + si hay bloqueo activo, un dot rojo <code>8px</code> sobre el badge.</li>
+        <li>Seleccionado: fondo <code>#EFF6FF</code>, borde izquierdo <strong>NO</strong> (baneado por DESIGN.md); usar fondo tintado completo.</li>
+        <li><code>cursor-pointer</code> + <code>scale(0.99)</code> en <code>:active</code>.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">B</div>
+      <h4>PurchaseTabNav — 6 tabs con badge de estado</h4>
+    </div>
+    <div class="phase-body">
+      <ul style="font-size:0.8rem;color:var(--mid);margin-left:16px;line-height:1.8;">
+        <li>Tab activo: texto Ink Slate 14px/600, indicador inferior <code>2px solid Action Blue</code> — sin gradiente.</li>
+        <li>Tab inactivo: texto Warm Ash, sin indicador.</li>
+        <li>Cada tab lleva un <code>TabStatusBadge</code> alineado a la derecha del label: colores semánticos (amber=pendiente, blue=en curso, red=bloqueado, green=completado, gray=n/a).</li>
+        <li>Transición de tab: <code>150ms ease-out</code>. Solo cambia el contenido, no anima el tab en sí (se usa decenas de veces al día — DESIGN.md, animation rules).</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">C</div>
+      <h4>ActionGate — acciones gateadas por rol</h4>
+    </div>
+    <div class="phase-body">
+      <p style="font-size:0.8rem;color:var(--ash);margin-bottom:8px;">Wrapper que renderiza sus children solo si el usuario tiene el rol requerido. Si no tiene rol, renderiza nada (no un botón deshabilitado, no un tooltip de permisos — simplemente no aparece).</p>
+      <div class="tree">
+<span class="note">// Uso en cualquier sub-tab</span>
+<span class="new">&lt;ActionGate roles={['jefe_comercial', 'gerencia_general']}&gt;</span>
+  <span class="file">&lt;Button onClick={handleApprove}&gt;Aprobar contrato&lt;/Button&gt;</span>
+<span class="new">&lt;/ActionGate&gt;</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">D</div>
+      <h4>SoceTrackSection — pista SOCE (solo compra pública)</h4>
+    </div>
+    <div class="phase-body">
+      <ul style="font-size:0.8rem;color:var(--mid);margin-left:16px;line-height:1.8;">
+        <li>Visible solo si <code>purchase.type === 'public'</code>.</li>
+        <li>Muestra los campos SERCOP nuevos en una cuadrícula de lectura (tipo formulario read-only con labels en 12px/500).</li>
+        <li>Si <code>outcome === 'won'</code>: muestra badge verde <span class="badge badge-green">GANADO</span> + campos de adjudicación.</li>
+        <li>Si <code>outcome === 'lost'</code>: muestra badge rojo <span class="badge badge-red">NO ADJUDICADO</span> + motivo.</li>
+        <li>Formulario de edición inline (no modal) para registrar resultado de puja, número de resolución, OC.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">E</div>
+      <h4>DocumentGateChecklist — gate de 9 documentos</h4>
+    </div>
+    <div class="phase-body">
+      <ul style="font-size:0.8rem;color:var(--mid);margin-left:16px;line-height:1.8;">
+        <li>Lista vertical con 9 ítems. Cada ítem: ícono de check verde si está completo, círculo gris si falta.</li>
+        <li>No usar cards por cada ítem — es una lista simple con íconos semánticos.</li>
+        <li>Al pie: contador <code>N de 9 documentos completos</code> en 12px/Warm Ash.</li>
+        <li>Botón "Enviar a gerencia" deshabilitado hasta que los 9 estén completos.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-num">F</div>
+      <h4>BlockerAlert — bloqueos activos</h4>
+    </div>
+    <div class="phase-body">
+      <p style="font-size:0.8rem;color:var(--ash);margin-bottom:8px;">Si hay bloqueos activos en <code>computeInstallationClosureGate</code>, mostrar un banner no-modal en la parte superior del panel de detalle. Fondo <code>var(--red-lt)</code>, texto descriptivo del bloqueo, sin modal.</p>
+      <div class="tree">
+<span class="note">// BlockerAlert.jsx</span>
+<span class="new">if (!blockers.length) return null;</span>
+<span class="file">return (</span>
+  <span class="file">&lt;div className="bg-red-50 border border-red-200 rounded-xl p-4 flex gap-3"&gt;</span>
+    <span class="note">  {/* ícono de alerta + lista de bloqueos activos */}</span>
+  <span class="file">&lt;/div&gt;</span>
+<span class="file">);</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>Reglas de diseño obligatorias (de DESIGN.md)</h3>
+  <div class="card">
+    <div class="rule"><span class="rule-icon">✓</span><span><code>WORKSPACE_PAGE_CLASS</code> (<code>flex min-w-0 flex-col</code>) como root de la página. Sin <code>min-h-screen</code> propio.</span></div>
+    <div class="rule"><span class="rule-icon">✓</span><span>Radio de <strong>16px</strong> en todos los botones y cards. Firma visual constante del sistema.</span></div>
+    <div class="rule"><span class="rule-icon">✓</span><span>Action Blue (#2563EB) en ≤10% de la superficie. Sin fondos azules, sin encabezados azules.</span></div>
+    <div class="rule"><span class="rule-icon">✓</span><span><code>cursor-pointer</code> en todos los elementos interactivos. <code>scale(0.97)</code> en <code>:active</code> de botones.</span></div>
+    <div class="rule"><span class="rule-icon">✓</span><span>Touch targets ≥44px en mobile. Tab bar superior con labels cortos o solo íconos en 375px.</span></div>
+    <div class="rule"><span class="rule-icon">✓</span><span>Empty state en todas las listas: ícono neutral + texto descriptivo + acción si aplica.</span></div>
+    <div class="rule"><span class="rule-icon">✓</span><span>Botones deshabilitados durante operaciones async. Spinner dentro del botón, no reemplaza el texto.</span></div>
+    <div class="rule"><span class="rule-icon">✓</span><span>Geist Mono para IDs de expediente, montos, fechas exactas en tablas.</span></div>
+    <div class="rule"><span class="rule-icon">✗</span><span><strong>Prohibido:</strong> <code>border-left &gt; 1px</code> como acento de color en items o cards.</span></div>
+    <div class="rule"><span class="rule-icon">✗</span><span><strong>Prohibido:</strong> cards anidadas dentro de cards.</span></div>
+    <div class="rule"><span class="rule-icon">✗</span><span><strong>Prohibido:</strong> gradiente en texto (<code>background-clip: text</code>).</span></div>
+    <div class="rule"><span class="rule-icon">✗</span><span><strong>Prohibido:</strong> modal como primera respuesta. Formularios inline o progressive disclosure primero.</span></div>
+  </div>
+
+  <h3>Migración de componentes existentes</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Acción</th><th>Componente actual</th><th>Destino en workspace</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge badge-red">Borrar</span></td><td><code>servicio/pages/TecnicoPrivatePurchases.jsx</code></td><td>Era solo un <code>&lt;Navigate&gt;</code>. Eliminar archivo + ruta.</td></tr>
+        <tr><td><span class="badge badge-amber">Mover</span></td><td><code>backoffice/pages/PrivatePurchases.jsx</code> (3 000 ln)</td><td>Lógica de fases comercial/contrato → <code>ComercialTab</code> + <code>ContratoTab</code></td></tr>
+        <tr><td><span class="badge badge-amber">Mover</span></td><td><code>comercial/pages/EquipmentPurchases.jsx</code></td><td>Lógica pública → <code>SoceTrackSection</code> dentro de <code>ComercialTab</code></td></tr>
+        <tr><td><span class="badge badge-amber">Mover</span></td><td><code>logistica/pages/LogisticaPrivatePurchases.jsx</code></td><td><code>LogisticaTab</code> — mismas acciones, gateadas por rol</td></tr>
+        <tr><td><span class="badge badge-amber">Mover</span></td><td><code>servicio/pages/PrivatePurchaseDeliveries.jsx</code></td><td><code>TecnicaTab</code> — F.ST-09, F.ST-10, CU flow</td></tr>
+        <tr><td><span class="badge badge-amber">Mover</span></td><td><code>servicio/pages/TechnicalProcedureWorkspace.jsx</code></td><td><code>SiteInspectionSection</code> en <code>TecnicaTab</code> (F.ST-07, F.ST-20)</td></tr>
+        <tr><td><span class="badge badge-amber">Mover</span></td><td><code>TrainingWorkflowWorkspace.jsx</code> + sub-steppers</td><td><code>EntrenamientoTab</code> — F.ST-04, F.ST-05, certificado</td></tr>
+        <tr><td><span class="badge badge-blue">Crear</span></td><td>—</td><td>Wrapper post-arrival para compra <strong>pública</strong> (<code>installationWorkflow</code> disponible en backend tras B-1.2)</td></tr>
+        <tr><td><span class="badge badge-navy">Mantener</span></td><td><code>comercial/delivery-ceilings</code></td><td>Permanece standalone (gestión de cupos/PAC, no es un expediente)</td></tr>
+        <tr><td><span class="badge badge-navy">Mantener</span></td><td><code>gerencia/PurchasesAlbumPage.jsx</code></td><td>Permanece standalone (vista de gerencia)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     TAB 4: CHG CHECKLIST
+════════════════════════════════════════════ -->
+<div class="panel" id="tab-3">
+  <p class="section-title">CHG Checklist — 9 cambios para implementación</p>
+  <p class="section-desc">Revisa cada ítem y marca: aprobado, ajustar, no hacer, o agrega un nuevo CHG. Una vez consensuado, los cambios se ejecutan en orden (CHG-01 primero, son los de mayor riesgo cero).</p>
+
+  <div class="chg-item">
+    <div class="chg-num">CHG-01</div>
+    <div class="chg-content">
+      <h4>Borrar duplicados puros</h4>
+      <p>Eliminar <code>TecnicoPrivatePurchases.jsx</code> y su ruta en <code>AppRoutes.jsx</code>. Es un <code>&lt;Navigate&gt;</code> sin lógica. Verificar que ningún navbar ni dashboard lo referencia.</p>
+      <ul>
+        <li>Eliminar: <code>spi_front/src/modules/servicio/pages/TecnicoPrivatePurchases.jsx</code></li>
+        <li>Limpiar ruta en <code>AppRoutes.jsx</code> (~línea 345)</li>
+        <li>Buscar referencias con grep antes de borrar</li>
+      </ul>
+    </div>
+    <div class="chg-meta">
+      <span class="badge badge-green">Riesgo bajo</span>
+      <span class="badge badge-navy">Backend: sin cambio</span>
+    </div>
+  </div>
+
+  <div class="chg-item">
+    <div class="chg-num">CHG-02</div>
+    <div class="chg-content">
+      <h4>Unificar UI logística-técnica</h4>
+      <p>Fusionar <code>LogisticaPrivatePurchases.jsx</code> y <code>PrivatePurchaseDeliveries.jsx</code> en las sub-tabs Logística y Técnica del workspace unificado. Mismos datos y lógica, gateados por rol.</p>
+      <ul>
+        <li>Crear <code>LogisticaTab.jsx</code> y <code>TecnicaTab.jsx</code> en el workspace</li>
+        <li>Mover lógica de ambos archivos hacia los nuevos componentes</li>
+        <li>Redirigir rutas antiguas al workspace con deep-link al tab correcto</li>
+      </ul>
+    </div>
+    <div class="chg-meta">
+      <span class="badge badge-amber">Riesgo medio</span>
+      <span class="badge badge-navy">Backend: sin cambio</span>
+    </div>
+  </div>
+
+  <div class="chg-item">
+    <div class="chg-num">CHG-03</div>
+    <div class="chg-content">
+      <h4>Compra pública con post-arrival</h4>
+      <p>Conectar <code>equipment_purchase_requests</code> al pipeline <code>installationWorkflow</code>. Las sub-tabs Técnica y Entrenamiento deben funcionar para expedientes públicos igual que para privados.</p>
+      <ul>
+        <li>Migración: agregar columna <code>installation_workflow JSONB</code> a <code>equipment_purchase_requests</code></li>
+        <li>Backend: actualizar <code>installationWorkflow.service.js</code> para soportar <code>sourceType: 'public'</code></li>
+        <li>Frontend: <code>TecnicaTab</code> y <code>EntrenamientoTab</code> funcionan con ambos tipos</li>
+      </ul>
+    </div>
+    <div class="chg-meta">
+      <span class="badge badge-red">Riesgo alto</span>
+      <span class="badge badge-red">Backend: requiere migración</span>
+    </div>
+  </div>
+
+  <div class="chg-item">
+    <div class="chg-num">CHG-04</div>
+    <div class="chg-content">
+      <h4>Migrar backoffice al workspace unificado</h4>
+      <p>Reemplazar <code>backoffice/pages/PrivatePurchases.jsx</code> (3 000 líneas) por las sub-tabs Comercial y Contrato del workspace. Mantener temporalmente la ruta como redirect.</p>
+      <ul>
+        <li>Crear <code>ComercialTab.jsx</code> y <code>ContratoTab.jsx</code> con la lógica migrada</li>
+        <li>Redirect: <code>/dashboard/backoffice/private-purchases</code> → <code>/dashboard/compras</code></li>
+        <li>Archivar <code>PrivatePurchases.jsx</code> en rama separada antes de eliminar</li>
+      </ul>
+    </div>
+    <div class="chg-meta">
+      <span class="badge badge-red">Riesgo alto</span>
+      <span class="badge badge-navy">Backend: sin cambio</span>
+    </div>
+  </div>
+
+  <div class="chg-item">
+    <div class="chg-num">CHG-05</div>
+    <div class="chg-content">
+      <h4>Embeber procedimiento técnico</h4>
+      <p>Integrar <code>TechnicalProcedureWorkspace.jsx</code> como sección dentro de la sub-tab Técnica. Eliminar la ruta del navbar (mantener como deep-link interno para notificaciones).</p>
+      <ul>
+        <li>Crear <code>SiteInspectionSection.jsx</code> dentro de <code>TecnicaTab</code></li>
+        <li>Quitar <code>/dashboard/servicio-tecnico/workspace-procedimiento</code> del navbar</li>
+        <li>Mantener la ruta como deep-link para links en notificaciones/emails</li>
+      </ul>
+    </div>
+    <div class="chg-meta">
+      <span class="badge badge-amber">Riesgo medio</span>
+      <span class="badge badge-navy">Backend: sin cambio</span>
+    </div>
+  </div>
+
+  <div class="chg-item">
+    <div class="chg-num">CHG-06</div>
+    <div class="chg-content">
+      <h4>Entrenamiento dentro del expediente</h4>
+      <p>Mostrar F.ST-04/F.ST-05/certificado dentro de la sub-tab Entrenamiento del expediente. La ruta global de entrenamiento pasa a ser solo una vista de gestión (listado de entrenamientos pendientes).</p>
+      <ul>
+        <li>Crear <code>EntrenamientoTab.jsx</code> con la lógica de <code>TrainingWorkflowWorkspace.jsx</code></li>
+        <li>Mantener <code>/dashboard/servicio-tecnico/aplicaciones</code> como vista global (no sub-tab)</li>
+        <li>Link entre la vista global y el expediente correspondiente vía <code>purchase_id</code></li>
+      </ul>
+    </div>
+    <div class="chg-meta">
+      <span class="badge badge-amber">Riesgo medio</span>
+      <span class="badge badge-navy">Backend: sin cambio</span>
+    </div>
+  </div>
+
+  <div class="chg-item">
+    <div class="chg-num">CHG-07</div>
+    <div class="chg-content">
+      <h4>Limpieza de navbar</h4>
+      <p>Eliminar entradas duplicadas del navbar. Conservar solo: Workspace de Compras, Cupos públicos (solo comercial/jefe), Álbum gerencia (solo gerencia).</p>
+      <ul>
+        <li>Quitar: <code>Compras privadas</code>, <code>Compras públicas</code>, <code>Entregas privadas</code>, <code>Workspace procedimiento</code></li>
+        <li>Ejecutar este CHG como último paso para no romper navegación durante la migración</li>
+      </ul>
+    </div>
+    <div class="chg-meta">
+      <span class="badge badge-green">Riesgo bajo</span>
+      <span class="badge badge-navy">Backend: sin cambio</span>
+    </div>
+  </div>
+
+  <div class="chg-item">
+    <div class="chg-num">CHG-08</div>
+    <div class="chg-content">
+      <h4>Consolidar modelo de entrega pública</h4>
+      <p>Decidir entre <code>delivery_ceiling/public_delivery_plan</code> (migraciones 126-128) y <code>equipment_purchase_requests.delivery_*</code> (migración 095). Dos modelos paralelos para el mismo concepto.</p>
+      <ul>
+        <li>Estado: <span class="badge badge-amber">DECISIÓN PENDIENTE</span> — no ejecutar hasta consenso</li>
+        <li>Opción A: deprecar <code>delivery_*</code> en EQP y usar solo el modelo de cupos</li>
+        <li>Opción B: deprecar tablas de cupos y consolidar en EQP</li>
+      </ul>
+    </div>
+    <div class="chg-meta">
+      <span class="badge badge-amber">En espera</span>
+      <span class="badge badge-red">Backend: decisión requerida</span>
+    </div>
+  </div>
+
+  <div class="chg-item">
+    <div class="chg-num">CHG-09</div>
+    <div class="chg-content">
+      <h4>Timeline unificado de auditoría</h4>
+      <p>Sub-tab Timeline que muestra todos los eventos del expediente: cambios de estado, subida de documentos, firmas, bloqueos resueltos. Fuente: tabla de auditoría existente + notificaciones de state machine.</p>
+      <ul>
+        <li>Crear <code>TimelineTab.jsx</code> + <code>AuditTimeline.jsx</code></li>
+        <li>Endpoint: <code>GET /api/purchases/workspace/:id/timeline</code></li>
+        <li>Visualización cronológica descendente; eventos agrupados por día</li>
+      </ul>
+    </div>
+    <div class="chg-meta">
+      <span class="badge badge-green">Riesgo bajo</span>
+      <span class="badge badge-amber">Backend: endpoint nuevo</span>
+    </div>
+  </div>
+
+  <div class="chg-item">
+    <div class="chg-num">CHG-10</div>
+    <div class="chg-content">
+      <h4>Campos SERCOP en compra pública</h4>
+      <p>Agregar los 15 campos identificados como faltantes para auditoría SERCOP completa. Sin ellos, el expediente no puede usarse para trazabilidad legal del proceso de adjudicación.</p>
+      <ul>
+        <li>Migración: <code>migration_XXX_add_sercop_fields.js</code></li>
+        <li>Backend: actualizar endpoints de compra pública para incluir estos campos</li>
+        <li>Frontend: formulario en <code>SoceTrackSection</code> para registrar adjudicación, OC, resolución</li>
+      </ul>
+    </div>
+    <div class="chg-meta">
+      <span class="badge badge-amber">Riesgo medio</span>
+      <span class="badge badge-red">Backend: migración + endpoints</span>
+    </div>
+  </div>
+
+  <div class="info-box blue" style="margin-top:20px;">
+    <strong>Orden de ejecución recomendado:</strong>
+    CHG-01 (eliminar muerto) → CHG-10 (migración SERCOP) → CHG-03 (migración post-arrival público) → CHG-09 (timeline endpoint) → CHG-02 (unificar logística/técnica) → CHG-05 (embeber procedimiento) → CHG-06 (entrenamiento en expediente) → CHG-04 (migrar backoffice) → CHG-07 (limpiar navbar) → CHG-08 (cuando haya consenso).
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     TAB 5: DESIGN SYSTEM
+════════════════════════════════════════════ -->
+<div class="panel" id="tab-4">
+  <p class="section-title">Design System: FamSPI — tokens y reglas para el workspace</p>
+  <p class="section-desc">Extraído de DESIGN.md. Todos los componentes del workspace unificado deben seguir estas especificaciones. Sin excepciones por módulo.</p>
+
+  <div class="grid-2">
+    <div>
+      <h3>Paleta de colores</h3>
+      <div class="card">
+        <h4 style="margin-bottom:10px;font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--mid);">Estructurales</h4>
+        <div class="token-row"><div class="token-swatch" style="background:#1E293B;"></div><span class="token-name">naval-slate</span><span class="token-hex">#1E293B — navbar, headers</span></div>
+        <div class="token-row"><div class="token-swatch" style="background:#334155;"></div><span class="token-name">storm-slate</span><span class="token-hex">#334155 — hover en nav, bordes card focus</span></div>
+        <div class="token-row"><div class="token-swatch" style="background:#0F172A;"></div><span class="token-name">midnight-slate</span><span class="token-hex">#0F172A — fondo oscuro</span></div>
+
+        <h4 style="margin:16px 0 10px;font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--mid);">Acción (≤10% de superficie)</h4>
+        <div class="token-row"><div class="token-swatch" style="background:#2563EB;"></div><span class="token-name">action-blue</span><span class="token-hex">#2563EB — botones primarios, tab activo</span></div>
+        <div class="token-row"><div class="token-swatch" style="background:#0EA5E9;"></div><span class="token-name">sky-signal</span><span class="token-hex">#0EA5E9 — focus rings, notificaciones</span></div>
+
+        <h4 style="margin:16px 0 10px;font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--mid);">Neutros</h4>
+        <div class="token-row"><div class="token-swatch" style="background:#FFFFFF;border:1px solid #E5E7EB;"></div><span class="token-name">surface-white</span><span class="token-hex">#FFFFFF — cards, panels, forms</span></div>
+        <div class="token-row"><div class="token-swatch" style="background:#F9FAFB;border:1px solid #E5E7EB;"></div><span class="token-name">paper-white</span><span class="token-hex">#F9FAFB — fondo de página</span></div>
+        <div class="token-row"><div class="token-swatch" style="background:#1F2937;"></div><span class="token-name">ink-slate</span><span class="token-hex">#1F2937 — texto principal</span></div>
+        <div class="token-row"><div class="token-swatch" style="background:#6B7280;"></div><span class="token-name">warm-ash</span><span class="token-hex">#6B7280 — texto secundario, timestamps</span></div>
+        <div class="token-row"><div class="token-swatch" style="background:#D1D5DB;"></div><span class="token-name">fog</span><span class="token-hex">#D1D5DB — bordes de inputs, separadores</span></div>
+        <div class="token-row"><div class="token-swatch" style="background:#E5E7EB;"></div><span class="token-name">soft-border</span><span class="token-hex">#E5E7EB — bordes de cards en reposo</span></div>
+
+        <h4 style="margin:16px 0 10px;font-size:0.75rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--mid);">Semánticos (solo estados)</h4>
+        <div class="token-row"><div class="token-swatch" style="background:#16A34A;"></div><span class="token-name">operative-green</span><span class="token-hex">#16A34A — aprobado, completado</span></div>
+        <div class="token-row"><div class="token-swatch" style="background:#DC2626;"></div><span class="token-name">alert-red</span><span class="token-hex">#DC2626 — bloqueado, rechazado, error</span></div>
+        <div class="token-row"><div class="token-swatch" style="background:#D97706;"></div><span class="token-name">caution-amber</span><span class="token-hex">#D97706 — pendiente, parcial</span></div>
+      </div>
+    </div>
+
+    <div>
+      <h3>Tipografía: Geist</h3>
+      <div class="card">
+        <div style="margin-bottom:14px;">
+          <div style="font-size:1.5rem;font-weight:700;letter-spacing:-0.02em;color:#0F172A;line-height:1.2;">Display</div>
+          <div style="font-size:0.7rem;color:var(--ash);">700 · clamp(1.5rem, 3vw, 2rem) · tracking -0.02em · 1 por pantalla</div>
+        </div>
+        <div style="margin-bottom:14px;padding-top:14px;border-top:1px solid var(--border);">
+          <div style="font-size:1.25rem;font-weight:600;letter-spacing:-0.01em;color:#0F172A;line-height:1.3;">Headline</div>
+          <div style="font-size:0.7rem;color:var(--ash);">600 · 1.25rem · tracking -0.01em · sección, modal header</div>
+        </div>
+        <div style="margin-bottom:14px;padding-top:14px;border-top:1px solid var(--border);">
+          <div style="font-size:1.125rem;font-weight:600;color:#0F172A;line-height:1.4;">Title</div>
+          <div style="font-size:0.7rem;color:var(--ash);">600 · 1.125rem · card secundaria, encabezado de tabla</div>
+        </div>
+        <div style="margin-bottom:14px;padding-top:14px;border-top:1px solid var(--border);">
+          <div style="font-size:0.875rem;font-weight:400;color:#1F2937;line-height:1.6;">Body — texto de contenido, max 70ch en lectura larga</div>
+          <div style="font-size:0.7rem;color:var(--ash);">400 · 0.875rem · línea máx 70ch</div>
+        </div>
+        <div style="padding-top:14px;border-top:1px solid var(--border);">
+          <div style="font-size:0.75rem;font-weight:500;color:#6B7280;letter-spacing:0.01em;">Label · etiqueta de campo · metadata</div>
+          <div style="font-size:0.7rem;color:var(--ash);">500 · 0.75rem · tracking 0.01em</div>
+        </div>
+      </div>
+
+      <h3>Sombras (jerarquía de elevación)</h3>
+      <div class="card">
+        <div style="margin-bottom:10px;padding:12px;border-radius:8px;background:white;box-shadow:0 2px 10px rgba(0,0,0,0.06);">
+          <div style="font-size:0.75rem;font-weight:600;color:#374151;">Ambient</div>
+          <div style="font-size:0.7rem;color:var(--ash);">0 2px 10px rgba(0,0,0,0.06) — cards en reposo</div>
+        </div>
+        <div style="margin-bottom:10px;padding:12px;border-radius:8px;background:white;box-shadow:0 4px 16px rgba(0,0,0,0.10);">
+          <div style="font-size:0.75rem;font-weight:600;color:#374151;">Lifted</div>
+          <div style="font-size:0.7rem;color:var(--ash);">0 4px 16px rgba(0,0,0,0.10) — hover, panel activo</div>
+        </div>
+        <div style="padding:12px;border-radius:8px;background:white;box-shadow:0 20px 60px rgba(15,23,42,0.18),0 4px 16px rgba(15,23,42,0.10);">
+          <div style="font-size:0.75rem;font-weight:600;color:#374151;">Overlay</div>
+          <div style="font-size:0.7rem;color:var(--ash);">compuesta — modales, dropdowns</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Animaciones: duraciones y curvas</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Elemento</th><th>Duración</th><th>Curva</th><th>Regla</th></tr></thead>
+      <tbody>
+        <tr><td>Press feedback (botón/card)</td><td><code>120ms</code></td><td><code>cubic-bezier(0.23, 1, 0.32, 1)</code></td><td><code>scale(0.97)</code> en <code>:active</code></td></tr>
+        <tr><td>Tab switch (contenido)</td><td><code>150ms</code></td><td><code>ease-out</code></td><td>Sin animar el tab en sí — uso frecuente</td></tr>
+        <tr><td>Tooltip / popover pequeño</td><td><code>150ms</code></td><td><code>cubic-bezier(0.23, 1, 0.32, 1)</code></td><td>scale(0.95) + opacity: 0 → 1</td></tr>
+        <tr><td>Dropdown, select</td><td><code>200ms</code></td><td><code>cubic-bezier(0.23, 1, 0.32, 1)</code></td><td>origin-aware (desde el trigger)</td></tr>
+        <tr><td>Modal open/close</td><td><code>280ms</code></td><td><code>cubic-bezier(0.32, 0.72, 0, 1)</code></td><td>scale(0.96) → 1 desde centro del viewport</td></tr>
+        <tr><td>Drawer lateral/bottom</td><td><code>320ms</code></td><td><code>cubic-bezier(0.32, 0.72, 0, 1)</code></td><td>translateX/Y desde el borde</td></tr>
+        <tr><td>Acciones de teclado frecuentes</td><td colspan="3"><strong>Sin animación. Nunca.</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Componentes base: especificaciones</h3>
+  <div class="grid-2">
+    <div class="card">
+      <h4>Botones</h4>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+        <button style="background:#2563EB;color:white;border:none;padding:8px 16px;border-radius:16px;font-size:0.8rem;font-weight:600;cursor:pointer;transition:transform 120ms;">Primary</button>
+        <button style="background:white;color:#1F2937;border:1px solid #D1D5DB;padding:8px 16px;border-radius:16px;font-size:0.8rem;font-weight:600;cursor:pointer;">Secondary</button>
+        <button style="background:transparent;color:#6B7280;border:none;padding:8px 16px;border-radius:16px;font-size:0.8rem;font-weight:600;cursor:pointer;">Ghost</button>
+        <button style="background:#DC2626;color:white;border:none;padding:8px 16px;border-radius:16px;font-size:0.8rem;font-weight:600;cursor:pointer;">Danger</button>
+      </div>
+      <p style="font-size:0.72rem;color:var(--ash);margin-top:10px;">Radio 16px · touch target 44px mobile · scale(0.97) :active · focus ring 2px sky-signal</p>
+    </div>
+    <div class="card">
+      <h4>Badges semánticos</h4>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
+        <span class="badge badge-amber">PENDIENTE</span>
+        <span class="badge badge-blue">EN CURSO</span>
+        <span class="badge badge-red">BLOQUEADO</span>
+        <span class="badge badge-green">COMPLETADO</span>
+        <span class="badge badge-navy">N/A</span>
+        <span class="badge badge-green">GANADO</span>
+        <span class="badge badge-red">NO ADJUDICADO</span>
+      </div>
+      <p style="font-size:0.72rem;color:var(--ash);margin-top:10px;">border-radius 9999px · 12px/600 · fondo soft del color semántico</p>
+    </div>
+  </div>
+
+  <h3>Checklist de entrega (pre-ship)</h3>
+  <div class="grid-2">
+    <div class="card">
+      <h4 style="margin-bottom:10px;">Visual</h4>
+      <div class="rule"><span>☐</span><span>Sin <code>border-left &gt; 1px</code> como acento de color</span></div>
+      <div class="rule"><span>☐</span><span>Sin gradiente en texto</span></div>
+      <div class="rule"><span>☐</span><span>Sin glassmorphism como default</span></div>
+      <div class="rule"><span>☐</span><span>Sin cards anidadas dentro de cards</span></div>
+      <div class="rule"><span>☐</span><span>Radio 16px en botones y cards</span></div>
+      <div class="rule"><span>☐</span><span>Action Blue en ≤10% de la superficie</span></div>
+    </div>
+    <div class="card">
+      <h4 style="margin-bottom:10px;">Interacción + Estructura</h4>
+      <div class="rule"><span>☐</span><span><code>cursor-pointer</code> en todos los interactivos</span></div>
+      <div class="rule"><span>☐</span><span><code>scale(0.97)</code> en <code>:active</code> de botones</span></div>
+      <div class="rule"><span>☐</span><span>Touch targets ≥44px en mobile</span></div>
+      <div class="rule"><span>☐</span><span>Botón deshabilitado durante async</span></div>
+      <div class="rule"><span>☐</span><span>Root usa <code>WORKSPACE_PAGE_CLASS</code></span></div>
+      <div class="rule"><span>☐</span><span>Sin <code>min-h-screen</code> dentro de DashboardLayout</span></div>
+    </div>
+    <div class="card">
+      <h4 style="margin-bottom:10px;">Contenido</h4>
+      <div class="rule"><span>☐</span><span>Empty state en todos los listados</span></div>
+      <div class="rule"><span>☐</span><span>Mensajes de error accionables</span></div>
+      <div class="rule"><span>☐</span><span>Sin em dashes en copy</span></div>
+      <div class="rule"><span>☐</span><span>Sin datos hardcodeados de ejemplo</span></div>
+    </div>
+    <div class="card">
+      <h4 style="margin-bottom:10px;">Accesibilidad</h4>
+      <div class="rule"><span>☐</span><span>Contraste WCAG AA: 4.5:1 texto normal</span></div>
+      <div class="rule"><span>☐</span><span><code>prefers-reduced-motion</code> respetado</span></div>
+      <div class="rule"><span>☐</span><span>Labels sobre inputs (no solo placeholder)</span></div>
+      <div class="rule"><span>☐</span><span>Focus ring visible en todos los interactivos</span></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /content -->
+
+<script>
+  function showTab(index) {
+    document.querySelectorAll('.panel').forEach((p, i) => {
+      p.classList.toggle('active', i === index);
+    });
+    document.querySelectorAll('.tab-btn').forEach((b, i) => {
+      b.classList.toggle('active', i === index);
+    });
+  }
+</script>
+</body>
+</html>

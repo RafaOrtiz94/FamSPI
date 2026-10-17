@@ -31,6 +31,20 @@ router.get("/google", controller.googleAuthRedirect);
  */
 router.get("/google/callback", controller.googleCallback);
 
+/**
+ * @route POST /api/v1/auth/local
+ * @desc Login usuario/contraseña — solo activo cuando SANDBOX_AUTH=true y NODE_ENV != production
+ */
+router.post("/local", controller.localLogin);
+
+/**
+ * @route POST /api/v1/auth/local-login
+ * @desc Login usuario/contraseña de PRODUCCION para usuarios sin OAuth
+ *       (pasantes). Cada usuario tiene su propio password_hash -- distinto
+ *       de /auth/local (sandbox, password compartida, deshabilitado en prod).
+ *       Ver docs/plans/pasantes-access-plan.md.
+ */
+router.post("/local-login", controller.localAuthLogin);
 
 // ======================================================
 // 🔒 2️⃣ RUTAS PROTEGIDAS (requieren Authorization: Bearer)
@@ -60,6 +74,14 @@ router.post("/logout", verifyToken, controller.logout);
  * @desc Registra la aceptación interna de LOPDP (nuevos colaboradores)
  */
 router.post("/lopdp/accept", verifyToken, controller.acceptInternalLopdp);
+
+/**
+ * @route POST /api/v1/auth/change-password
+ * @desc Cambia la password del usuario autenticado (auth_provider=local).
+ *       Usado tanto en el flujo obligatorio (must_change_password=true,
+ *       tras alta o reset admin) como en cambio voluntario.
+ */
+router.post("/change-password", verifyToken, controller.changePassword);
 
 // ======================================================
 // 🧾 3️⃣ AUDITORÍA DE SESIONES (solo TI / Gerencia)

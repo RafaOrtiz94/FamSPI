@@ -1,6 +1,8 @@
 const cron = require("node-cron");
 const db = require("../config/db");
 const logger = require("../config/logger");
+const { isOffHours } = require("../utils/offHoursPolicy");
+const { registerOffHoursJob } = require("./offHoursCoordinator");
 
 /**
  * CRON Job - CA-01-02 Limpieza de Áreas
@@ -11,7 +13,7 @@ const logger = require("../config/logger");
 
 const ESCALATION_THRESHOLD_HOURS = 24;
 
-const escalateOverdueLogs = async () => {
+const runEscalationSweep = async () => {
   logger.info("CA-01-02 SLA Scheduler: Iniciando revisión de registros sin verificar...");
 
   const client = await db.connect();
@@ -51,7 +53,17 @@ const escalateOverdueLogs = async () => {
   }
 };
 
+const escalateOverdueLogs = async () => {
+  if (isOffHours(new Date()).isOffHours) return; // manejado por offHoursCoordinator
+  await runEscalationSweep();
+};
+
 // Ejecutar cada 30 minutos
 cron.schedule("*/30 * * * *", escalateOverdueLogs);
+registerOffHoursJob({
+  name: "ca0102_cleaning_escalation",
+  runOnce: runEscalationSweep,
+  offHoursIntervalMs: 30 * 6 * 60 * 1000,
+});
 
 module.exports = { escalateOverdueLogs };

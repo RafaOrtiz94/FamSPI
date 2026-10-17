@@ -8,6 +8,9 @@ import {
  FiShield,
  FiArrowRight,
  FiLink,
+ FiCalendar,
+ FiCpu,
+ FiGrid,
 } from "react-icons/fi";
 import toast from "react-hot-toast";
 import api from "../../core/api";
@@ -68,10 +71,11 @@ const DashboardTI = () => {
  const activos = users.filter((u) => u.active !== false).length;
  const inactivos = users.filter((u) => u.active === false).length;
  const departamentos = departments.filter((d) => String(d.status || "").toLowerCase() !== "inactive").length;
- const departamentosInactivos = departments.filter((d) => String(d.status || "").toLowerCase() === "inactive").length;
- const role = (user?.role || "").toLowerCase();
- const auditActive = Boolean(auditStatus?.active);
- const canSeeAudit = auditActive || ["admin_ti", "jefe_ti", "ti"].includes(role);
+const departamentosInactivos = departments.filter((d) => String(d.status || "").toLowerCase() === "inactive").length;
+const role = (user?.role || "").toLowerCase();
+const auditActive = Boolean(auditStatus?.active);
+const canSeeAudit = auditActive || ["admin_ti", "jefe_ti", "ti"].includes(role);
+const canManagePeopleAdmin = ["ti", "jefe_ti"].includes(role);
 
  // ============================================================
  // 🔹 Render principal
@@ -145,13 +149,15 @@ const DashboardTI = () => {
  {/* ACCESOS DIRECTOS */}
  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
  {[
- {
+ canManagePeopleAdmin
+ ? {
  title: "Usuarios y Departamentos",
  desc: "Centraliza la gestion de usuarios, roles y estructura organizacional.",
  path: "/dashboard/talento-humano/gestion",
  gradient: "from-blue-600 via-blue-500 to-blue-400",
  icon: <FiSettings size={24} />,
- },
+ }
+ : null,
  {
  title: "Auditoría y Trazabilidad",
  desc: "Consulta la actividad completa y la bitácora de sesiones.",
@@ -160,11 +166,39 @@ const DashboardTI = () => {
  icon: <FiShield size={24} />,
  },
  {
+ title: "Dispositivos TI",
+ desc: "Administra equipos corporativos, asignaciones, estados y trazabilidad de cambios.",
+ path: "/dashboard/ti/dispositivos",
+ gradient: "from-indigo-600 via-blue-500 to-cyan-500",
+ icon: <FiCpu size={24} />,
+ },
+ {
+ title: "Modulos por Usuario",
+ desc: "Activa o desactiva modulos por usuario desde workspace TI.",
+ path: "/dashboard/ti/modulos",
+ gradient: "from-slate-700 via-slate-600 to-slate-500",
+ icon: <FiGrid size={24} />,
+ },
+ {
+ title: "Cronograma de Mantenimientos TI",
+ desc: "Planifica y gestiona mantenimientos de celulares y computadoras asignadas.",
+ path: "/dashboard/ti/mantenimientos",
+ gradient: "from-emerald-600 via-teal-500 to-cyan-500",
+ icon: <FiCalendar size={24} />,
+ },
+ {
  title: "Casos Externos ST-01-04",
  desc: "Monitorea salud de Navify/REXIS/GoApp, errores y reintentos de sincronización.",
  path: "/dashboard/ti/casos-externos",
  gradient: "from-cyan-600 via-sky-500 to-blue-500",
  icon: <FiLink size={24} />,
+ },
+ {
+ title: "Kick Off 2026",
+ desc: "Gestiona el evento interno: cronograma, presentaciones, sala de preguntas y moderación en vivo.",
+ path: "/dashboard/kickoff",
+ gradient: "from-violet-600 via-purple-500 to-fuchsia-500",
+ icon: <FiCalendar size={24} />,
  },
  canSeeAudit
  ? {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { FiPlus, FiTrash2, FiCheckCircle } from "react-icons/fi";
 import Button from "./Button";
 import Modal from "./Modal";
@@ -371,6 +371,7 @@ export const PrivatePurchaseRequestModal = ({
  onSuccess,
  initialOfferKind = "venta",
  hideOfferKindSelector = false,
+ initialClient = null,
 }) => {
  const TYPE_CHIPS = {
  new_available: "bg-emerald-100 text-emerald-800 border-emerald-200",
@@ -467,7 +468,7 @@ export const PrivatePurchaseRequestModal = ({
 
  const canSubmit = validationIssues.length === 0 && !loading;
 
- const handleClientSelect = (client) => {
+ const handleClientSelect = useCallback((client) => {
  if (!client) {
  return;
  }
@@ -497,7 +498,12 @@ export const PrivatePurchaseRequestModal = ({
  client_name: "",
  client_identifier: "",
  }));
- };
+ }, []);
+
+ useEffect(() => {
+ if (!isOpen || !initialClient) return;
+ handleClientSelect(initialClient);
+ }, [isOpen, initialClient, handleClientSelect]);
 
  const handleClientSearchChange = (value) => {
  setClientSearchTerm(value);
@@ -588,7 +594,13 @@ export const PrivatePurchaseRequestModal = ({
  }, [isOpen, showToast]);
 
  useEffect(() => {
- if (!isOpen) {
+ // Se aplica al ABRIR (no al cerrar): el modal se monta una sola vez en la
+ // página y initialOfferKind solo llega como prop actualizado después de
+ // que el usuario elige el subtipo en el selector de 2 pasos. Resetear en
+ // el cierre dejaba "venta" pegado del montaje inicial sin importar lo
+ // elegido -- el tipo (alquiler / alquiler con transferencia de dominio)
+ // debe reflejarse siempre, no solo cuando coincide con el default.
+ if (isOpen) {
  setFormData({
  client_id: "",
  client_snapshot: {

@@ -14,6 +14,9 @@ const {
   upsertWithdrawalPackages,
 } = require("./packagingLabels.service");
 const { buildDriveLink } = require("./fst11.service");
+const { markRequestCompleted } = require("../requests/requests.service");
+const notificationManager = require("../notifications/notificationManager");
+const { ROLE_GROUPS } = require("../../middlewares/roles");
 
 const WORKFLOW_STATUS = Object.freeze({
   REQUESTED: "withdrawal_requested",
@@ -191,6 +194,24 @@ const buildError = (
   error.code = code;
   if (details && typeof details === "object") error.details = details;
   return error;
+};
+
+// Notifica al solicitante del F.ST-21 en los hitos que le importan del retiro
+// fisico (coordinacion, ejecucion, cierre). Nadie lo avisaba antes de esto.
+const notifyWithdrawalRequester = (requesterId, { clientName, title, message, subjectSuffix, priority = 1, type = "task" } = {}) => {
+  if (!Number.isFinite(Number(requesterId))) return;
+  notificationManager
+    .sendNotification({
+      userId: Number(requesterId),
+      customTitle: title,
+      customMessage: message,
+      type,
+      source: "servicio.withdrawal_workflow",
+      priority,
+      email: true,
+      data: { email_subject: `F.ST-21 - ${clientName || "Cliente pendiente"} - ${subjectSuffix}` },
+    })
+    .catch((err) => logger.warn({ err }, "No se pudo notificar evento de retiro de equipo"));
 };
 
 const inferEquipmentNameFromPayload = (payload = {}) => {
@@ -466,6 +487,7 @@ const loadRetiroRequestById = async (requestId) => {
         r.payload,
         r.created_at,
         r.updated_at,
+        r.requester_id,
         rt.code AS type_code,
         rt.title AS type_title
       FROM requests r
@@ -501,6 +523,7 @@ const buildRequestSnapshot = (requestRow) => {
     request_type_code: normalizeText(requestRow?.type_code),
     request_type_title: normalizeText(requestRow?.type_title),
     request_created_at: requestRow?.created_at || null,
+    requester_id: requestRow?.requester_id || null,
     payload,
     client_name: normalizeText(payload?.nombre_cliente || payload?.cliente || payload?.client_name),
     equipment_name: inferEquipmentNameFromPayload(payload),
@@ -1081,6 +1104,12 @@ const applyWorkflowAction = async ({
         pickup_date: scheduledDate,
       },
     };
+    notifyWithdrawalRequester(requestSnapshot.requester_id, {
+      clientName: row.client_name || requestSnapshot.client_name,
+      title: "Retiro de equipo coordinado",
+      message: `Se coordinó el retiro de equipo para ${row.client_name || requestSnapshot.client_name || "cliente"} el ${scheduledDate}.`,
+      subjectSuffix: "Retiro coordinado",
+    });
     return {
       nextState,
       eventType: "withdrawal_coordinated",
@@ -1163,23 +1192,63 @@ const applyWorkflowAction = async ({
         code: "WITHDRAWAL_WORK_ORDER_NUMBER_REQUIRED",
       });
     }
+
+    // Asignado real (usuario del sistema), ademas del texto libre historico
+    // assigned_to/assigned_email -- sin esto no hay a quien notificar ni un
+    // "apartado" real para que el asignado cumpla el retiro.
+    let assignedUser = null;
+    const assignedUserId = Number.isFinite(Number(payload.assigned_user_id))
+      ? Number(payload.assigned_user_id)
+      : null;
+    if (assignedUserId) {
+      const { rows } = await db.query(
+        `SELECT id, email, role, COALESCE(fullname, name, email) AS display_name FROM public.users WHERE id = $1`,
+        [assignedUserId],
+      );
+      assignedUser = rows[0] || null;
+      if (!assignedUser) {
+        throw buildError("El usuario asignado no existe", {
+          status: 400,
+          code: "WITHDRAWAL_ASSIGNEE_NOT_FOUND",
+        });
+      }
+      const assignedRole = String(assignedUser.role || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      if (!ROLE_GROUPS.tecnico.includes(assignedRole)) {
+        throw buildError(
+          "El usuario asignado debe ser ingeniero de servicio, especialista de aplicaciones o jefe de servicio",
+          { status: 409, code: "WITHDRAWAL_ASSIGNEE_INVALID" },
+        );
+      }
+    }
+
     const nextState = {
       ...workflowState,
       work_order: {
         ...workflowState.work_order,
         status: "open",
         work_order_number: workOrderNumber,
-        assigned_to: normalizeText(payload.assigned_to) || workflowState.work_order.assigned_to,
+        assigned_to: normalizeText(payload.assigned_to) || assignedUser?.display_name || workflowState.work_order.assigned_to,
         assigned_email:
-          normalizeText(payload.assigned_email) || workflowState.work_order.assigned_email,
+          normalizeText(payload.assigned_email) || assignedUser?.email || workflowState.work_order.assigned_email,
+        assigned_user_id: assignedUserId || workflowState.work_order.assigned_user_id || null,
         notes: normalizeText(payload.notes) || workflowState.work_order.notes,
         opened_at: now,
       },
     };
+
+    if (assignedUser) {
+      notifyWithdrawalRequester(assignedUser.id, {
+        clientName: row.client_name || requestSnapshot.client_name,
+        title: "Retiro de equipo asignado",
+        message: `Tienes un retiro de equipo asignado para ${row.client_name || requestSnapshot.client_name || "cliente"} (WO ${workOrderNumber}).`,
+        subjectSuffix: "Retiro asignado",
+      });
+    }
+
     return {
       nextState,
       eventType: "withdrawal_work_order_opened",
-      eventPayload: { work_order_number: workOrderNumber },
+      eventPayload: { work_order_number: workOrderNumber, assigned_user_id: assignedUserId },
     };
   }
 
@@ -1333,6 +1402,12 @@ const applyWorkflowAction = async ({
         notes: normalizeText(payload.notes) || workflowState.logistics.notes,
       },
     };
+    notifyWithdrawalRequester(requestSnapshot.requester_id, {
+      clientName: row.client_name || requestSnapshot.client_name,
+      title: "Equipo retirado",
+      message: `El equipo de ${row.client_name || requestSnapshot.client_name || "cliente"} fue retirado físicamente.${nextState.logistics.tracking_reference ? ` Guía: ${nextState.logistics.tracking_reference}.` : ""}`,
+      subjectSuffix: "Equipo retirado",
+    });
     return {
       nextState,
       eventType: "withdrawal_executed",
@@ -1398,6 +1473,24 @@ const applyWorkflowAction = async ({
         closed_by_email: withUser.user_email,
       },
     };
+
+    if (Number.isFinite(Number(row.request_id))) {
+      markRequestCompleted(Number(row.request_id), {
+        actorUser: user,
+        resultMeta: { source: "withdrawal_closed", closed_at: now },
+      }).catch((err) =>
+        logger.warn({ err, requestId: row.request_id }, "No se pudo completar la solicitud tras cerrar el retiro"),
+      );
+    }
+
+    notifyWithdrawalRequester(requestSnapshot.requester_id, {
+      clientName: row.client_name || requestSnapshot.client_name,
+      title: "Retiro de equipo cerrado",
+      message: `El proceso de retiro de equipo de ${row.client_name || requestSnapshot.client_name || "cliente"} quedó cerrado.${nextState.withdrawal_act.fst11_link ? ` Acta F.ST-11: ${nextState.withdrawal_act.fst11_link}` : ""}`,
+      subjectSuffix: "Retiro cerrado",
+      type: "success",
+    });
+
     return {
       nextState,
       eventType: "withdrawal_closed",
@@ -1701,5 +1794,6 @@ module.exports = {
   initializeWithdrawalWorkflow,
   updateWithdrawalWorkflowAction,
   attachFst11DocumentToWorkflow,
+  applyWorkflowAction,
 };
 

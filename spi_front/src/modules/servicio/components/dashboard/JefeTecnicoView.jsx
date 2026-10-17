@@ -1,193 +1,213 @@
 import React from "react";
-import {
- FiTool,
- FiUsers,
- FiAlertTriangle,
- FiCheckSquare,
- FiShoppingCart,
-} from "react-icons/fi";
-import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard";
-import Card from "../../../../core/ui/components/Card";
+import { useNavigate } from "react-router-dom";
 
-import { DashboardHeader, SectionTitle } from "../../../../core/ui/layouts/DashboardLayout";
-import PendingApprovals from "../../components/PendingApprovals";
-import PermisosStatusWidget from "../../../shared/solicitudes/components/PermisosStatusWidget";
+import ServicioCard from "../../design/ServicioCard";
+import ServicioEmptyState from "../../design/ServicioEmptyState";
+import PermisosCompactCard from "../../../shared/solicitudes/components/PermisosCompactCard";
+import DispatchStrip from "./DispatchStrip";
+import DispatchLog from "./DispatchLog";
+import { availabilityColor, availabilityLabel, parseDashboardPayload } from "./dashboardViewShared";
 
-const availabilityColor = (status) => {
- const value = (status || "").toString().toLowerCase();
- if (["disponible", "available", "on"].includes(value)) return "bg-green-50 text-green-700 border-green-200";
- if (["ocupado", "busy"].includes(value)) return "bg-yellow-50 text-yellow-700 border-yellow-200";
- return "bg-red-50 text-red-700 border-red-200";
-};
-
-const availabilityLabel = (status) => {
- const value = (status || "").toString().toLowerCase();
- if (["disponible", "available", "on"].includes(value)) return "Disponible";
- if (["ocupado", "busy"].includes(value)) return "Ocupado";
- return "No disponible";
-};
+// Accesos directos a lo que no entra en la bitacora de despacho (calendario
+// y ejecucion bajo demanda) -- franja de texto tipo tabs, no grid de cards
+// identicas ni pills redondeadas genericas.
+const SECONDARY_ACTIONS = [
+  { label: "Cronograma", path: "/dashboard/servicio-tecnico/cronograma" },
+  { label: "Retiros", path: "/dashboard/servicio-tecnico/solicitudes?tab=retiro" },
+  { label: "Aplicaciones ST", path: "/dashboard/servicio-tecnico/aplicaciones" },
+  { label: "Disponibilidad", path: "/dashboard/servicio-tecnico/disponibilidad" },
+];
 
 const JefeTecnicoView = ({
- stats,
- maintenances,
- approvals,
- availability = [],
- onRefresh,
- onOpenPublicPurchases,
- onOpenWithdrawals,
+  stats,
+  preventiveSummary = null,
+  availability = [],
+  scheduleRows = [],
+  scheduleBacklog = [],
+  actionQueueItems = [],
+  actionQueueLoading = false,
+  onRefresh,
+  displayedSolicitudes = [],
+  onOpenRequestsModal,
 }) => {
- return (
- <>
- <DashboardHeader
- title="Dirección Técnica"
- subtitle="Supervisión de operaciones, mantenimientos y equipo técnico"
- actions={
- <button
- onClick={onRefresh}
- className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50"
- >
- Actualizar
- </button>
- }
- />
+  const navigate = useNavigate();
 
+  const stripItems = [
+    { label: "En cola", value: actionQueueItems.length },
+    { label: "Urgentes", value: stats.alertas || 0, emphasis: true },
+    { label: "Por coordinar", value: stats.pendingCoordination || 0 },
+    { label: "Técnicos libres", value: stats.tecnicosActivos || 0 },
+  ];
 
- <div className="mb-6">
- <PermisosStatusWidget />
- </div>
+  return (
+    <div className="st-scope space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <span
+            className="font-mono-data inline-block rounded-[3px] px-1.5 py-0.5 text-[10px] font-bold tracking-wide"
+            style={{ background: "var(--st-accent-soft)", color: "var(--st-accent-strong)" }}
+          >
+            JEFE-SVC
+          </span>
+          <h1 className="mt-2 text-2xl font-semibold" style={{ color: "var(--st-text)", fontFamily: "var(--st-font-display)" }}>
+            Coordinación del equipo técnico
+          </h1>
+          <p className="text-sm" style={{ color: "var(--st-text-muted)" }}>
+            Qué requiere tu decisión hoy, priorizado por urgencia.
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          className="cursor-pointer rounded-[var(--st-radius-lg)] border px-4 py-2 text-sm font-medium transition-all duration-150 ease-out hover:bg-[var(--st-bg)] hover:shadow-[var(--st-shadow-raised)] active:scale-[0.97]"
+          style={{ borderColor: "var(--st-border)", color: "var(--st-text-muted)", background: "var(--st-surface)" }}
+        >
+          Actualizar
+        </button>
+      </div>
 
- <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
- <ExecutiveStatCard
- label="Mantenimientos Activos"
- value={stats.pendientes}
- icon={<FiTool size={20} />}
- from="from-blue-600"
- to="to-blue-500"
- />
- <ExecutiveStatCard
- label="Técnicos en Campo"
- value={stats.tecnicosActivos || 0}
- icon={<FiUsers size={20} />}
- from="from-indigo-600"
- to="to-indigo-500"
- />
- <ExecutiveStatCard
- label="Alertas Críticas"
- value={stats.alertas || 0}
- icon={<FiAlertTriangle size={20} />}
- from="from-red-600"
- to="to-red-500"
- />
- <ExecutiveStatCard
- label="Cumplimiento Mes"
- value={`${stats.cumplimiento || 0}%`}
- icon={<FiCheckSquare size={20} />}
- from="from-green-600"
- to="to-green-500"
- />
- </div>
+      <DispatchStrip items={stripItems} />
 
- <Card className="p-5 mb-6">
- <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
- <div>
- <h3 className="text-base font-semibold text-slate-900">Workspace técnico unificado</h3>
- <p className="text-sm text-slate-600">
- Ejecuta el procedimiento ST-01-01 por proceso (público y privado) en una sola vista.
- </p>
- </div>
- <div className="flex flex-wrap gap-2">
- <button
- onClick={onOpenPublicPurchases}
- className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
- >
- <FiShoppingCart size={16} />
- Abrir workspace técnico
- </button>
- <button
- onClick={onOpenWithdrawals}
- className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100"
- >
- Retiros F.ST-11
- </button>
- </div>
- </div>
- </Card>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <div className="space-y-5 lg:col-span-2">
+          <ServicioCard className="p-5">
+            <DispatchLog
+              queueItems={actionQueueItems}
+              queueLoading={actionQueueLoading}
+              scheduleRows={scheduleRows}
+              emptyDescription="Inspección, retiro, correctivos, preventivo y casos externos aparecerán aquí."
+            />
+          </ServicioCard>
 
- <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
- <div className="lg:col-span-2 space-y-6">
- <PendingApprovals onActionComplete={onRefresh} />
+          {scheduleBacklog.length ? (
+            <ServicioCard className="p-5">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-sm font-semibold" style={{ color: "var(--st-text)", fontFamily: "var(--st-font-display)" }}>
+                  Sin fecha coordinada
+                </h3>
+                <span className="font-mono-data text-xs" style={{ color: "var(--st-text-faint)" }}>{scheduleBacklog.length}</span>
+              </div>
+              <div className="divide-y" style={{ borderColor: "var(--st-border)" }}>
+                {scheduleBacklog.slice(0, 5).map((item) => (
+                  <div key={item.id} className="py-2">
+                    <p className="text-sm font-medium" style={{ color: "var(--st-text)" }}>{item.title}</p>
+                    <p className="text-xs" style={{ color: "var(--st-text-muted)" }}>
+                      Ventana: {item.window_min_date || "—"} a {item.window_max_date || "—"}
+                      {item.user_name ? ` · ${item.user_name}` : ""}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </ServicioCard>
+          ) : null}
 
- <Card className="p-5">
- <SectionTitle title="Resumen de Mantenimientos" />
- <div className="overflow-x-auto">
- <table className="w-full text-sm text-left">
- <thead className="text-xs text-gray-700 uppercase bg-gray-50">
- <tr>
- <th className="px-4 py-3">Equipo</th>
- <th className="px-4 py-3">Tipo</th>
- <th className="px-4 py-3">Responsable</th>
- <th className="px-4 py-3">Estado</th>
- </tr>
- </thead>
- <tbody>
- {maintenances && maintenances.length > 0 ? (
- maintenances.slice(0, 5).map((m) => (
- <tr key={m.id} className="border-b hover:bg-gray-50">
- <td className="px-4 py-3 font-medium">{m.equipo_nombre}</td>
- <td className="px-4 py-3">{m.tipo}</td>
- <td className="px-4 py-3">{m.responsable || "Sin asignar"}</td>
- <td className="px-4 py-3">
- <span className={`px-2 py-1 rounded-full text-xs font-medium
- ${m.estado === 'completado' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
- {m.estado}
- </span>
- </td>
- </tr>
- ))
- ) : (
- <tr>
- <td colSpan="4" className="px-4 py-3 text-center text-gray-500">
- No hay mantenimientos recientes.
- </td>
- </tr>
- )}
- </tbody>
- </table>
- </div>
- </Card>
- </div>
+          <div className="flex flex-wrap items-center border-y" style={{ borderColor: "var(--st-border)" }}>
+            {SECONDARY_ACTIONS.map((action, index) => (
+              <button
+                key={action.path}
+                onClick={() => navigate(action.path)}
+                className="cursor-pointer px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] transition-colors duration-150 hover:text-[var(--st-accent-strong)] active:scale-[0.97]"
+                style={{
+                  color: "var(--st-text-muted)",
+                  borderLeft: index > 0 ? "1px solid var(--st-border)" : undefined,
+                }}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
 
- <div className="space-y-6">
- <Card className="p-5">
- <SectionTitle title="Disponibilidad de Equipo" />
- <div className="space-y-3">
- {availability && availability.length > 0 ? (
- availability.map((member) => (
- <div
- key={member.id || member.userId || member.name}
- className={`flex items-center justify-between p-2 rounded border ${availabilityColor(member.status)}`}
- >
- <div>
- <p className="text-sm font-medium">{member.name || member.fullname || "Técnico"}</p>
- {member.updatedAt && (
- <p className="text-xs text-gray-500">
- Actualizado {new Date(member.updatedAt).toLocaleString()}
- </p>
- )}
- </div>
- <span className="text-xs font-medium">{availabilityLabel(member.status)}</span>
- </div>
- ))
- ) : (
- <p className="text-sm text-gray-500">Sin información de disponibilidad.</p>
- )}
- </div>
- </Card>
- </div>
- </div>
+          <ServicioCard className="p-5">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold" style={{ color: "var(--st-text)", fontFamily: "var(--st-font-display)" }}>
+                Cumplimiento del plan preventivo
+              </h3>
+              <button onClick={() => navigate("/dashboard/servicio-tecnico/mantenimientos")} className="cursor-pointer text-xs font-medium transition-colors duration-150 hover:text-[var(--st-accent-strong)]" style={{ color: "var(--st-accent)" }}>
+                Ver plan
+              </button>
+            </div>
+            {preventiveSummary?.plan ? (
+              <div className="mt-3 flex flex-wrap gap-x-8 gap-y-2">
+                <div>
+                  <p className="text-xs" style={{ color: "var(--st-text-faint)" }}>Plan activo</p>
+                  <p className="text-sm font-semibold" style={{ color: "var(--st-text)" }}>{preventiveSummary.plan.title || `Plan ${preventiveSummary.plan.plan_year}`}</p>
+                </div>
+                <div>
+                  <p className="text-xs" style={{ color: "var(--st-text-faint)" }}>Cumplimiento</p>
+                  <p className="font-mono-data text-xl font-semibold" style={{ color: "var(--st-text)" }}>
+                    {preventiveSummary.rate !== null ? `${preventiveSummary.rate}%` : "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs" style={{ color: "var(--st-text-faint)" }}>Items</p>
+                  <p className="text-sm font-semibold" style={{ color: "var(--st-text)" }}>
+                    {preventiveSummary.plan.completed_items || 0}/{preventiveSummary.plan.total_items || 0}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <ServicioEmptyState title="Sin plan preventivo activo" description="Genera un plan anual desde Mantenimientos para ver aquí su cumplimiento." />
+            )}
+          </ServicioCard>
 
- </>
- );
+          <ServicioCard className="p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold" style={{ color: "var(--st-text)", fontFamily: "var(--st-font-display)" }}>
+                Solicitudes en curso
+              </h3>
+              <button onClick={onOpenRequestsModal} className="cursor-pointer text-xs font-medium transition-colors duration-150 hover:text-[var(--st-accent-strong)]" style={{ color: "var(--st-accent)" }}>
+                Historial
+              </button>
+            </div>
+            {displayedSolicitudes.length === 0 ? (
+              <ServicioEmptyState title="No hay solicitudes abiertas" />
+            ) : (
+              <div className="divide-y" style={{ borderColor: "var(--st-border)" }}>
+                {displayedSolicitudes.map((request) => {
+                  const payload = parseDashboardPayload(request.payload);
+                  const clientName = payload.nombre_cliente || payload.cliente || payload.customer_name || "Cliente";
+                  const requestStatus = request.status || request.estado || "Pendiente";
+                  return (
+                    <div key={`${request.id}-${requestStatus}`} className="flex items-center justify-between gap-3 py-2">
+                      <span className="truncate text-sm" style={{ color: "var(--st-text)" }}>{clientName}</span>
+                      <span className="shrink-0 text-xs" style={{ color: "var(--st-text-muted)" }}>{requestStatus}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </ServicioCard>
+        </div>
+
+        <div className="space-y-5">
+          <ServicioCard className="p-5">
+            <h3 className="text-sm font-semibold" style={{ color: "var(--st-text)", fontFamily: "var(--st-font-display)" }}>
+              Equipo
+            </h3>
+            <div className="mt-3 divide-y" style={{ borderColor: "var(--st-border)" }}>
+              {availability.length ? (
+                availability.map((member) => (
+                  <div key={member.id || member.userId || member.name} className="flex items-start justify-between gap-3 py-2">
+                    <span className="min-w-0 flex-1 text-sm leading-snug" style={{ color: "var(--st-text)" }}>
+                      {member.name || member.fullname || "Técnico"}
+                    </span>
+                    <span
+                      className={`inline-flex shrink-0 items-center rounded-[3px] px-1.5 py-0.5 text-[10px] font-bold uppercase ${availabilityColor(member.status)}`}
+                    >
+                      {availabilityLabel(member.status)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <p className="py-2 text-sm" style={{ color: "var(--st-text-faint)" }}>Sin información de disponibilidad.</p>
+              )}
+            </div>
+          </ServicioCard>
+        </div>
+      </div>
+
+      <PermisosCompactCard />
+    </div>
+  );
 };
 
 export default JefeTecnicoView;

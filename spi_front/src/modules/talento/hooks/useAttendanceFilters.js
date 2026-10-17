@@ -5,6 +5,7 @@ import { attendanceDateRanges, normalizeQuickRange } from "../utils/attendanceDa
 const ATTENDANCE_REPORT_MODES = Object.freeze({
   OFFICIAL: "official",
   ADMIN: "admin",
+  TEAM: "team",
 });
 
 const ATTENDANCE_REPORT_VIEWS = Object.freeze({
@@ -12,7 +13,12 @@ const ATTENDANCE_REPORT_VIEWS = Object.freeze({
   MAP: "map",
 });
 
-const normalizeMode = (value) => (String(value || "").trim().toLowerCase() === "admin" ? "admin" : "official");
+const normalizeMode = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "admin") return "admin";
+  if (normalized === "team") return "team";
+  return "official";
+};
 
 const normalizeView = (value) => (String(value || "").trim().toLowerCase() === "map" ? "map" : "table");
 
