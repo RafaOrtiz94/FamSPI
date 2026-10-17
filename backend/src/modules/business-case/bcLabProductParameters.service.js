@@ -232,6 +232,11 @@ async function saveProductParameters(businessCaseId, items, actorEmail) {
 module.exports = {
   getProductParameters,
   saveProductParameters,
+  normalizeCode,
+  systemKeysForEquipment,
+  resolveSystemSpec,
+  manufacturerValues,
+  effectiveValues,
   __testables: {
     systemKeysForEquipment,
     resolveSystemSpec,

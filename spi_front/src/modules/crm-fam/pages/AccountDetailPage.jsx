@@ -17,6 +17,7 @@ import { accountClassification, accountType } from "../ui/status";
 import { useUrlState } from "../ui/useUrlState";
 import AccountPlans, { planPeriod } from "./account/AccountPlans";
 import { AccountContacts, AccountOpportunities, AccountTimeline } from "./account/AccountTabs";
+import AccountInstalledBase from "./account/AccountInstalledBase";
 
 const BASE = "/dashboard/crm-fam";
 // Misma lista que MANAGER_OR_ADMIN_ROLES del backend: solo ellos fusionan cuentas o reasignan vendedor.
@@ -28,6 +29,7 @@ const TABS = [
   { value: "foda", label: "FODA" },
   { value: "contactos", label: "Contactos" },
   { value: "oportunidades", label: "Oportunidades" },
+  { value: "instalada", label: "Base instalada" },
   { value: "actividad", label: "Actividad" },
 ];
 
@@ -154,7 +156,7 @@ export default function AccountDetailPage() {
         className="mb-6"
         items={[
           { label: "Meta del plan", value: stats.loading ? "—" : hasPlan ? money(s.sales_target_amount) : "Sin plan", hint: hasPlan ? `${s.plan.name} · ${planPeriod(s.plan)}` : "Crea un plan en la pestaña Planes" },
-          { label: "Vendido", value: stats.loading || !s ? "—" : money(s.sold_amount), hint: "ganado o en Contratos" },
+          { label: "Vendido", value: stats.loading || !s ? "—" : money(s.sold_amount), hint: "ganado o con contrato" },
           { label: "Falta por vender", value: stats.loading || !hasPlan ? "—" : money(s.remaining_to_target) },
           { label: "Pipeline a generar", value: stats.loading || !pipelineReady ? "—" : money(s.required_pipeline_amount), hint: pipelineReady ? `win rate ${s.seller.win_rate_pct}% de ${s.seller.name || "el vendedor"}` : hasPlan ? "el vendedor aún no tiene ventas ganadas" : undefined },
         ]}
@@ -216,6 +218,7 @@ export default function AccountDetailPage() {
       {tab === "foda" && <AccountSwotCard accountId={id} planId={url.plan || null} />}
       {tab === "contactos" && <AccountContacts accountId={id} />}
       {tab === "oportunidades" && <AccountOpportunities accountId={id} />}
+      {tab === "instalada" && <AccountInstalledBase accountId={id} />}
       {tab === "actividad" && <AccountTimeline accountId={id} />}
 
       {editing && (

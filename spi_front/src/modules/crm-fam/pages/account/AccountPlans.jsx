@@ -66,7 +66,7 @@ function PlanFormModal({ accountId, plan, canEditSeller, onClose, onSaved }) {
           <Field label="Inicio del periodo" optional>
             {(p) => <TextInput {...p} type="date" value={form.period_start} onChange={set("period_start")} />}
           </Field>
-          <Field label="Fin del periodo" optional hint="Sin periodo, cuenta todo lo ganado o en Contratos.">
+          <Field label="Fin del periodo" optional hint="Sin periodo, cuenta todo lo ganado o ya con contrato.">
             {(p) => <TextInput {...p} type="date" value={form.period_end} onChange={set("period_end")} />}
           </Field>
           <Field label="Estado">
@@ -131,7 +131,7 @@ export function PlanProjection({ stats, loading }) {
         columns={2}
         items={[
           { label: "Meta del plan", value: hasPlan ? money(stats.sales_target_amount) : "—", numeric: true },
-          { label: "Vendido (ganado + Contratos)", value: `${money(stats.sold_amount)} · ${number(stats.sold_opportunities)} opp.`, numeric: true },
+          { label: "Vendido (ganado o con contrato)", value: `${money(stats.sold_amount)} · ${number(stats.sold_opportunities)} opp.`, numeric: true },
           { label: "Falta por vender", value: hasPlan ? money(stats.remaining_to_target) : "—", numeric: true },
           { label: "Vendedor del plan", value: seller.name ? `${seller.name} · ${number(seller.won_count)} ganadas, ${number(seller.lost_count)} perdidas` : "—" },
           { label: "Total generado en la cuenta", value: `${money(stats.total_estimated_amount)} · ${number(stats.total_opportunities)} opp.`, numeric: true },

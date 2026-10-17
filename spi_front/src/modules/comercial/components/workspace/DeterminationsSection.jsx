@@ -9,6 +9,19 @@ import { promptDialog } from "../../../../core/ui/utils/promptDialog";
 import { formatDateTimeSafe } from "../../../../shared/utils/dateUtils";
 import SectionEditorBadge from "./SectionEditorBadge";
 import {
+ DeliveryHistoryPanel,
+ LabStatisticsPanel,
+ PREDICTION_VALIDATOR_ROLES,
+ PredictionCell,
+ PredictionChangeModal,
+ SECTION_ITEM_TYPE,
+ SheetDifferenceModal,
+ predictionKey,
+ useDeterminationPredictions,
+ useDeliveryHistory,
+ useLabStatistics,
+} from "./DeterminationPredictions";
+import {
  getDeterminationsStatDocumentInfo,
  uploadDeterminationsStatDocument,
 } from "../../../../core/api/businessCaseApi";
@@ -418,6 +431,34 @@ const DeterminationsSection = ({
  const gatePhase = String(gateInfo?.phase || "commercial_input").toLowerCase();
  const quantitiesLocked = gateInfo?.quantitiesLocked === true;
  const isTechnicalRole = TECNICO_ROLES.has(normalizedCurrentRole);
+ // Prediccion del motor para calibradores, controles y materiales (los reactivos vienen de
+ // DET/AÑO/PROCESO del Sheet). Jefe de Servicio la valida o la cambia explicando el motivo.
+ const predictions = useDeterminationPredictions(bcId);
+ const labStatistics = useLabStatistics(bcId);
+ const deliveryHistory = useDeliveryHistory(bcId);
+ const labStatisticsPending = labStatistics.missingRequired.length > 0;
+ const canValidatePredictions = PREDICTION_VALIDATOR_ROLES.has(normalizedCurrentRole);
+ const [predictionToChange, setPredictionToChange] = useState(null);
+ const [predictionToJustify, setPredictionToJustify] = useState(null);
+ // PRODUCTO A ENTREGAR distinto de la prediccion sin justificar: bloquea el cierre tecnico.
+ const unjustifiedDifferences = (predictions.data?.items || []).filter((item) => item.needsJustification);
+ const [predictionBusy, setPredictionBusy] = useState(false);
+ const validatePredictionItems = async (items, successMessage) => {
+  setPredictionBusy(true);
+  try {
+   await predictions.validate(items);
+   showToast(successMessage, "success");
+  } catch (requestError) {
+   showToast(requestError?.response?.data?.message || "No se pudo guardar la validación.", "error");
+  } finally {
+   setPredictionBusy(false);
+  }
+ };
+ const predictionForRow = (row, sectionKey) => (
+  SECTION_ITEM_TYPE[sectionKey]
+   ? predictions.byKey.get(predictionKey(row?.equipmentId, SECTION_ITEM_TYPE[sectionKey], getManufacturerId(row))) || null
+   : null
+ );
  const canUploadDocument = gateInfo?.permissions?.canUploadDocument === true;
  const uploadReadiness = gateInfo?.uploadReadiness || null;
  const uploadBlockingMessage = uploadReadiness?.message || null;
@@ -1008,7 +1049,8 @@ const toggleSectionCollapsed = (groupKey, sectionKey) => {
  const stateKey = `${groupKey}:${sectionKey}`;
  setCollapsedSections((prev) => ({
  ...prev,
- [stateKey]: !prev[stateKey],
+ // Sin valor la seccion esta cerrada (ver isSectionCollapsed): el primer clic debe abrirla.
+ [stateKey]: prev[stateKey] === false,
  }));
 };
 
@@ -1259,6 +1301,24 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
 
  return (
  <div className="space-y-5 animate-fadeIn">
+ <SheetDifferenceModal
+  prediction={predictionToJustify}
+  reasons={predictions.data?.justificationReasons || undefined}
+  processMonths={predictions.data?.processMonths}
+  onClose={() => setPredictionToJustify(null)}
+  onSave={async (decision) => {
+   await predictions.validate([decision]);
+   showToast("Justificación guardada.", "success");
+  }}
+ />
+ <PredictionChangeModal
+  prediction={predictionToChange}
+  onClose={() => setPredictionToChange(null)}
+  onSave={async (decision) => {
+   await predictions.validate([decision]);
+   showToast(decision.reason ? "Cambio guardado con su motivo." : "Predicción validada.", "success");
+  }}
+ />
  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
  <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
  <FiActivity size={24} />
@@ -1273,6 +1333,18 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  </div>
  </div>
  </div>
+
+ <DeliveryHistoryPanel
+  history={deliveryHistory.data}
+  canUpload={canValidatePredictions}
+  onUpload={async (file) => { await deliveryHistory.upload(file); predictions.reload(); }}
+ />
+
+ <LabStatisticsPanel
+  statistics={labStatistics.data}
+  canEdit={canValidatePredictions}
+  onSave={async (values) => { await labStatistics.save(values); predictions.reload(); }}
+ />
 
  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 space-y-3">
  <div className="flex flex-col gap-1">
@@ -1569,11 +1641,16 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
  <div className="text-xs text-emerald-800">
  Cuando controles, calibradores y materiales ya tengan sus cantidades sincronizadas, puedes bloquearlos todos de una vez.
+ {unjustifiedDifferences.length > 0 && (
+  <span className="mt-1 block font-semibold text-rose-700">
+   {unjustifiedDifferences.length} producto(s) tienen en PRODUCTO A ENTREGAR una cantidad distinta a la predicción del motor: justifique el cálculo o el criterio de cada uno ("Justificar diferencia") para poder cerrar.
+  </span>
+ )}
  </div>
  <button
  type="button"
  onClick={handleCloseAllTechnicalSubsections}
- disabled={saving}
+ disabled={saving || unjustifiedDifferences.length > 0}
  className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
  >
  <FiCheck size={14} />
@@ -1752,6 +1829,9 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
      Producto a Enviar incluso en reactivos. */}
  {section.key === "reactivos" ? "DET/AÑO/PROCESO (Sheet)" : "PRODUCTO A ENTREGAR (Sheet)"}
  </th>
+ {SECTION_ITEM_TYPE[section.key] && (
+  <th className="py-3 px-4 font-semibold">Predicción del motor</th>
+ )}
  </tr>
  </thead>
  <tbody className="divide-y divide-gray-50">
@@ -1775,12 +1855,26 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  <td className="py-3 px-4 font-medium text-gray-900">
  {getSheetQtyDisplayValue(row, section.key)}
  </td>
+ {SECTION_ITEM_TYPE[section.key] && (
+  <td className="py-3 px-4 align-top">
+   <PredictionCell
+    prediction={predictionForRow(row, section.key)}
+    canValidate={canValidatePredictions && !labStatisticsPending}
+    busy={predictionBusy}
+    onValidate={(prediction) => validatePredictionItems([{
+     equipmentId: prediction.equipmentId, itemType: prediction.itemType, supplierCode: prediction.supplierCode,
+    }], "Predicción validada.")}
+    onChange={(prediction) => setPredictionToChange(prediction)}
+    onJustify={(prediction) => setPredictionToJustify(prediction)}
+   />
+  </td>
+ )}
  </tr>
  );
  })}
  {!rows.length && (
  <tr>
- <td colSpan={3} className="py-8 text-center text-gray-500">
+ <td colSpan={SECTION_ITEM_TYPE[section.key] ? 4 : 3} className="py-8 text-center text-gray-500">
  No hay elementos en {section.title.toLowerCase()} para este equipo.
  </td>
  </tr>
@@ -1788,6 +1882,29 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
  </tbody>
  </table>
  </div>
+ {SECTION_ITEM_TYPE[section.key] && canValidatePredictions && (() => {
+  const pending = rows.map((row) => predictionForRow(row, section.key)).filter((prediction) => prediction && !prediction.validation);
+  if (!pending.length) return null;
+  return (
+   <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-gray-100 bg-emerald-50/40">
+    <span className="text-xs text-gray-600">
+     {pending.length} predicción(es) del motor sin validar en {section.title.toLowerCase()}.
+     {labStatisticsPending && " Complete primero las estadísticas del laboratorio."}
+    </span>
+    <button
+     type="button"
+     disabled={predictionBusy || labStatisticsPending}
+     onClick={() => validatePredictionItems(
+      pending.map((prediction) => ({ equipmentId: prediction.equipmentId, itemType: prediction.itemType, supplierCode: prediction.supplierCode })),
+      `${pending.length} predicción(es) validada(s).`,
+     )}
+     className="rounded-lg border border-emerald-300 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-60"
+    >
+     Validar las {pending.length} sin cambios
+    </button>
+   </div>
+  );
+ })()}
  {rows.length > visibleRows.length && (
  <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/70">
  <button

@@ -661,3 +661,43 @@ registró en el Sheet. El modelo histórico anterior queda como comparación.
 - Aún falta el lado del reactivo: frecuencia de calibración y volumen de
   calibrador/control por prueba en c 303. Sale de los Method Sheets de cada
   reactivo y es requisito para la Fase 2 (motor de simulación).
+
+### Motor transversal en beta — infraestructura de sombra (2026-10-13)
+
+Por decisión del usuario, el alcance del motor nuevo comprende **todas las
+familias y equipos**, pero continúa visible únicamente para
+`jefe_ti`/`jefe_de_ti` y no escribe en la oferta.
+
+- `consumableRules.rules.js` contiene un registro de adaptadores con selección
+  exacta por categoría, equipo y tipo de producto. No existe fallback entre
+  equipos. El registro permanece vacío hasta contar con fórmulas y evidencia
+  validadas; en ese estado devuelve `status: "no_rule"` y nunca fabrica una
+  cantidad.
+- `consumableRules.service.js` arma la cobertura por equipo usando consumos del
+  BC y `parameters.linked_products`. Devuelve duración, ambiente, ficha vigente,
+  versión, documento fuente, valores de fabricante, overrides y valor efectivo,
+  cada uno con su origen.
+- El universo de equipos de un BC sale exclusivamente de
+  `bc_equipment_selection`, que es la selección vigente. Las filas históricas o
+  inconsistentes de `bc_consumption_items` para equipos no seleccionados no se
+  incorporan al motor.
+- `businessCasePricingLab.service.js#buildPreview` expone el resultado en
+  `equipment[].ruleEngine` como tercera fuente, conservando
+  `equipment[].calculation` (hoja auditada) y `equipment[].predictiveModel`
+  (histórico). La nueva fuente siempre declara `mode: "shadow_read_only"`,
+  `publishable: false` y `offerWriteEnabled: false`.
+- `PricingLabSection.jsx` compara Regla / Hoja / Histórico, mantiene visibles los
+  productos `no_rule`, permite filtrar y agrupa por categoría real y equipo. La
+  identidad de comparación incluye equipo + tipo + código para evitar mezclar
+  el mismo producto entre analizadores.
+- Inventario Neon del 2026-10-13: 25 BC actuales con equipo seleccionado, 11
+  equipos y 6 categorías almacenadas. De 185 productos únicos con demanda, 159
+  tienen ficha vigente y solo 2 están `verified`; ningún reactivo demandado está
+  verificado. Existen 22 selecciones huérfanas y no deben entrar en métricas.
+- Pendiente antes de producir cantidades: fórmulas respaldadas por familia,
+  consumo de calibrador/control por evento, regla ISE, desperdicio, convención
+  de meses a días y unidad de redondeo comercial.
+- Smoke test real de solo lectura: `buildPreview` ejecutó contra Neon para c303
+  (Histolab: 170 productos) y XP300 (4 productos), sin errores SQL ni de
+  serialización. Todos quedaron `no_rule` porque aún no hay adaptadores
+  registrados.

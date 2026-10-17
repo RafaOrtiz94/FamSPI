@@ -1,7 +1,7 @@
 // Kit de interfaz del CRM, construido sobre los roles semánticos de DESIGN.md (clases fam-*).
 // Reglas que encarna: radios por función (6px etiqueta, 8px control, 12px panel), paneles planos
 // sin sombra, una acción primaria por zona, foco visible y estados que no dependen solo del color.
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FiAlertCircle, FiArrowDown, FiArrowUp, FiChevronDown, FiSearch, FiX } from "react-icons/fi";
 import Modal from "../../../core/ui/components/Modal";
@@ -409,9 +409,21 @@ export function DefList({ items, columns = 1 }) {
 }
 
 // ─── Menú desplegable (disclosure accesible) ─────────────────────────────────
-export function Menu({ label, icon: Icon, items, align = "right", variant = "secondary", size = "md" }) {
+// iconOnly: el disparador es solo el icono (con el texto como nombre accesible y tooltip), para
+// pies de tarjeta donde el ancho es justo.
+export function Menu({ label, icon: Icon, items, align = "right", variant = "secondary", size = "md", iconOnly = false, className }) {
   const [open, setOpen] = useState(false);
+  const [side, setSide] = useState(align);
   const ref = useRef(null);
+  const listRef = useRef(null);
+  // Al abrir se mide la lista: si se sale de la ventana por un lado, se ancla al otro.
+  useLayoutEffect(() => {
+    if (!open) { setSide(align); return; }
+    const rect = listRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    if (rect.left < 8) setSide("left");
+    else if (rect.right > window.innerWidth - 8) setSide("right");
+  }, [open, align]);
   useEffect(() => {
     if (!open) return undefined;
     const onDown = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
@@ -422,13 +434,17 @@ export function Menu({ label, icon: Icon, items, align = "right", variant = "sec
   }, [open]);
 
   return (
-    <div ref={ref} className="relative">
-      <Btn variant={variant} size={size} icon={Icon} aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((v) => !v)}>
-        {label}
-        <FiChevronDown className={cx("h-4 w-4 transition-transform duration-100", open && "rotate-180")} aria-hidden="true" />
-      </Btn>
+    <div ref={ref} className="relative shrink-0">
+      {iconOnly && Icon ? (
+        <IconBtn icon={Icon} label={label} aria-expanded={open} aria-haspopup="true" className={className} onClick={() => setOpen((v) => !v)} />
+      ) : (
+        <Btn variant={variant} size={size} icon={Icon} aria-expanded={open} aria-haspopup="true" onClick={() => setOpen((v) => !v)}>
+          {label}
+          <FiChevronDown className={cx("h-4 w-4 transition-transform duration-100", open && "rotate-180")} aria-hidden="true" />
+        </Btn>
+      )}
       {open && (
-        <ul className={cx("absolute z-20 mt-1 min-w-[200px] rounded-xl border border-fam-border bg-fam-raised p-1 shadow-[var(--shadow-popover)]", align === "right" ? "right-0" : "left-0")}>
+        <ul ref={listRef} className={cx("absolute z-20 mb-0 mt-1 min-w-[200px] max-w-[calc(100vw-16px)] list-none rounded-xl border border-fam-border bg-fam-raised p-1 shadow-[var(--shadow-popover)]", side === "right" ? "right-0" : "left-0")}>
           {items.filter(Boolean).map((it) => (
             <li key={it.label}>
               <button

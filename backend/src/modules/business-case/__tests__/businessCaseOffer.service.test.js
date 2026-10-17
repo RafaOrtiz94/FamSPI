@@ -1135,6 +1135,16 @@ describe("businessCaseOffer.service", () => {
     expect(freeText.determination_only).toBe(false);
   });
 
+  test("el tipo de montaje separado tiene prioridad sobre el objeto libre y conserva el fallback legado", () => {
+    const { resolveOfferContractObjectType } = service.__testables;
+
+    expect(resolveOfferContractObjectType({
+      contract_object: "Adquisición de reactivos y equipamiento para laboratorio",
+      modern_bc_metadata: { general_data: { contract_object_type: "DETERMINACION EFECTIVA" } },
+    })).toBe("DETERMINACION EFECTIVA");
+    expect(resolveOfferContractObjectType({ contract_object: "TODO COMPRADO" })).toBe("TODO COMPRADO");
+  });
+
   test("computeSectionEquipmentGroups agrupa filas consecutivas del mismo equipo sin reordenar", () => {
     const groups = service.__testables.computeSectionEquipmentGroups([
       { product: "R1", equipmentName: "cobas e411 disk" },

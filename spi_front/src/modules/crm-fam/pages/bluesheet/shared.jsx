@@ -83,12 +83,27 @@ export function useElementRedFlags(blueSheetId, onError) {
   const [flags, setFlags] = useState([]);
   const same = (f, type, id) => f.related_entity_type === type && f.related_entity_id === id;
 
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
     if (!blueSheetId) return undefined;
     let cancelled = false;
     fetchElementRedFlags(blueSheetId).then((rows) => { if (!cancelled) setFlags(Array.isArray(rows) ? rows : []); }).catch(() => { if (!cancelled) setFlags([]); });
     return () => { cancelled = true; };
-  }, [blueSheetId]);
+  }, [blueSheetId, reloadKey]);
+  // Tras guardar un paso: el servidor pudo marcar o resolver red flags automáticas.
+  const reload = () => setReloadKey((k) => k + 1);
+
+  // Red flags sobre campos del Blue Sheet (urgencia, presupuesto, textos). La clave del campo va en flag_category.
+  const fieldFlag = (field) => flags.find((f) => f.related_entity_type === "field" && f.flag_category === field) || null;
+  const toggleField = async (field, text) => {
+    try {
+      await toggleElementRedFlag(blueSheetId, { related_entity_type: "field", field, text });
+    } catch (err) {
+      onError?.(errorMessage(err, "No se pudo actualizar la red flag."));
+    } finally {
+      reload();
+    }
+  };
 
   const isFlagged = (type, id) => flags.some((f) => same(f, type, id));
   const toggle = async (type, id, label) => {
@@ -101,7 +116,7 @@ export function useElementRedFlags(blueSheetId, onError) {
       onError?.(errorMessage(err, "No se pudo actualizar la red flag."));
     }
   };
-  return { isFlagged, toggle, count: flags.length };
+  return { isFlagged, toggle, fieldFlag, toggleField, reload, count: flags.length };
 }
 
 // Botón para marcar/desmarcar un elemento como red flag. `suggested` = el sistema la sugiere (p. ej. acción vencida).

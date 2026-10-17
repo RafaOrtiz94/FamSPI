@@ -114,7 +114,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (url.pathname.startsWith("/static/")) {
+  // Cache-first solo para archivos con hash en el nombre (main.abc123.js): son inmutables.
+  // En desarrollo los archivos no llevan hash (bundle.js) y cambian con cada guardado; si se
+  // cachearan, el navegador seguiria corriendo codigo viejo.
+  if (url.pathname.startsWith("/static/") && /\.[0-9a-f]{6,}\./i.test(url.pathname.split("/").pop() || "")) {
     event.respondWith(cacheFirstAsset(request));
   }
 });

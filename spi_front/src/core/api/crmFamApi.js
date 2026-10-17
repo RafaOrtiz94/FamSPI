@@ -49,6 +49,13 @@ export const updateAccount = (id, data) => api.put(`/crm-fam/accounts/${id}`, da
 export const deleteAccount = (id) => api.delete(`/crm-fam/accounts/${id}`).then(r => r.data?.data);
 export const fetchAccountTimeline = (id) => api.get(`/crm-fam/accounts/${id}/timeline`).then(r => r.data?.data);
 export const fetchAccountSalesStats = (id, planId) => api.get(`/crm-fam/accounts/${id}/sales-stats`, { params: planId ? { plan_id: planId } : {} }).then(r => r.data?.data);
+export const fetchExecutiveBoard = (params) => api.get("/crm-fam/dashboard/executive", { params }).then(r => r.data?.data);
+export const fetchSalesGoals = (params) => api.get("/crm-fam/sales-goals", { params }).then(r => r.data?.data);
+export const saveSalesGoal = (data) => api.put("/crm-fam/sales-goals", data).then(r => r.data?.data);
+export const fetchLeadDuplicates = (params) => api.get("/crm-fam/leads/duplicates", { params }).then(r => r.data?.data);
+export const fetchAccountInstalledBase = (id) => api.get(`/crm-fam/accounts/${id}/installed-base`).then(r => r.data?.data);
+export const fetchNextActions = (params) => api.get("/crm-fam/dashboard/next-actions", { params }).then(r => r.data?.data);
+export const fetchActiveAccountPlans = () => api.get("/crm-fam/account-plans/active").then(r => r.data?.data);
 export const fetchAccountPlans = (id) => api.get(`/crm-fam/accounts/${id}/plans`).then(r => r.data?.data);
 export const createAccountPlan = (id, data) => api.post(`/crm-fam/accounts/${id}/plans`, data).then(r => r.data?.data);
 export const updateAccountPlan = (id, planId, data) => api.put(`/crm-fam/accounts/${id}/plans/${planId}`, data).then(r => r.data?.data);

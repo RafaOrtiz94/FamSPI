@@ -2,6 +2,7 @@ const service = require("./crm.service");
 const delivery = require("./crmCampaignDelivery.service");
 const swot = require("./crmAccountSwot.service");
 const journey = require("./crmOpportunityJourney.service");
+const insights = require("./crmInsights.service");
 const respond = (res, fn) =>
   fn.then((data) => res.json({ ok: true, data }))
     .catch((err) => res.status(err.status || 500).json({ ok: false, message: err.message || "Error" }));
@@ -14,6 +15,7 @@ const updateAccount = (req, res) => respond(res, service.updateAccount(req.param
 const softDeleteAccount = (req, res) => respond(res, service.softDeleteAccount(req.params.id, req.user));
 const getAccountTimeline = (req, res) => respond(res, service.getAccountTimeline(req.params.id, req.user));
 const getAccountSalesStats = (req, res) => respond(res, service.getAccountSalesStats(req.params.id, req.user, req.query.plan_id));
+const listActivePlansBoard = (req, res) => respond(res, service.listActivePlansBoard(req.user));
 const listAccountPlans = (req, res) => respond(res, service.listAccountPlans(req.params.id, req.user));
 const createAccountPlan = (req, res) => respond(res, service.createAccountPlan(req.params.id, req.body, req.user));
 const updateAccountPlan = (req, res) => respond(res, service.updateAccountPlan(req.params.id, req.params.planId, req.body, req.user));
@@ -79,6 +81,13 @@ const closeWon = (req, res) => respond(res, service.closeWon(req.params.id, req.
 const closeLost = (req, res) => respond(res, service.closeLost(req.params.id, req.body, req.user));
 const suspendOpportunity = (req, res) => respond(res, service.suspendOpportunity(req.params.id, req.body, req.user));
 const getOpportunityHealth = (req, res) => respond(res, service.getOpportunityHealth(req.params.id, req.user));
+// Inteligencia comercial: metas, tablero de direccion, duplicados y base instalada.
+const listSalesGoals = (req, res) => respond(res, insights.listSalesGoals(req.query, req.user));
+const upsertSalesGoal = (req, res) => respond(res, insights.upsertSalesGoal(req.body, req.user));
+const getExecutiveBoard = (req, res) => respond(res, insights.getExecutiveBoard(req.query, req.user));
+const findLeadDuplicates = (req, res) => respond(res, insights.findLeadDuplicates(req.query, req.user));
+const getAccountInstalledBase = (req, res) => respond(res, service.getAccountById(req.params.id, req.user).then((account) => insights.getAccountInstalledBase(account)));
+const listNextActions = (req, res) => respond(res, journey.listNextActions(req.query, req.user));
 const listOpportunityJourneys = (req, res) => respond(res, journey.listJourneys(req.query, req.user));
 const getOpportunityJourney = (req, res) => respond(res, journey.getJourney(req.params.id, req.user));
 const getOpportunityPurchaseStatus = (req, res) => respond(res, service.getOpportunityPurchaseStatus(req.params.id, req.user));
@@ -214,7 +223,7 @@ const downloadBlueSheetPdf = async (req, res) => {
 module.exports = {
   listAccounts, getAccountById, createAccount, updateAccount, softDeleteAccount, getAccountTimeline,
   getAccountSalesStats, mergeAccounts, getAccountDuplicateCandidates,
-  listAccountPlans, createAccountPlan, updateAccountPlan, softDeleteAccountPlan,
+  listAccountPlans, listActivePlansBoard, createAccountPlan, updateAccountPlan, softDeleteAccountPlan,
   listContacts, getContactById, createContact, updateContact, softDeleteContact,
   listEmailCampaigns, getEmailCampaignById, createEmailCampaign, updateEmailCampaign, softDeleteEmailCampaign,
   getAccountSwot, createSwotItem, acceptSwotSuggestion, dismissSwotSuggestion, updateSwotItem, deleteSwotItem,
@@ -226,7 +235,8 @@ module.exports = {
   listPipelineStages, createPipelineStage, updatePipelineStage,
   listOpportunities, getOpportunityById, createOpportunity, updateOpportunity,
   changeOpportunityStage, closeWon, closeLost, suspendOpportunity, getOpportunityHealth, getOpportunityPurchaseStatus, linkPurchaseToOpportunity,
-  listOpportunityJourneys, getOpportunityJourney,
+  listOpportunityJourneys, getOpportunityJourney, listNextActions,
+  listSalesGoals, upsertSalesGoal, getExecutiveBoard, findLeadDuplicates, getAccountInstalledBase,
   createBlueSheet, getBlueSheetByOpportunity, getBlueSheetById,
   updateBlueSheetGeneral, updateBlueSheetBuyingProcess, updateBlueSheetStrategy,
   submitBlueSheetForReview, approveBlueSheet, observeBlueSheet, reopenBlueSheet,

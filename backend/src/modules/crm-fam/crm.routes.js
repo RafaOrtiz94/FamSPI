@@ -24,6 +24,11 @@ const upload = multer({
 // Dashboard / Reports
 router.get("/dashboard", requireRole(allCrm), controller.getDashboardSummary);
 router.get("/dashboard/pipeline", requireRole(allCrm), controller.getPipelineByStage);
+router.get("/dashboard/next-actions", requireRole(allCrm), controller.listNextActions);
+router.get("/dashboard/executive", requireRole(managerAdmin), controller.getExecutiveBoard);
+// Metas mensuales por vendedor: cada quien ve la suya; jefatura ve y edita todas.
+router.get("/sales-goals", requireRole(allCrm), controller.listSalesGoals);
+router.put("/sales-goals", requireRole(managerAdmin), controller.upsertSalesGoal);
 router.get("/dashboard/forecast", requireRole(managerAdmin), controller.getForecast);
 router.get("/dashboard/blue-sheet-kpis", requireRole(managerAdmin), controller.getBlueSheetKpis);
 router.get("/reports/lost-reasons", requireRole(managerAdmin), controller.getLostReasonsReport);
@@ -70,6 +75,9 @@ router.put("/accounts/:id", requireRole(crmAll), controller.updateAccount);
 router.delete("/accounts/:id", requireRole(crmAll), controller.softDeleteAccount);
 router.get("/accounts/:id/timeline", requireRole(allCrm), controller.getAccountTimeline);
 router.get("/accounts/:id/sales-stats", requireRole(allCrm), controller.getAccountSalesStats);
+// Planes activos de todas las cuentas visibles, para la franja de planes del embudo.
+router.get("/account-plans/active", requireRole(allCrm), controller.listActivePlansBoard);
+router.get("/accounts/:id/installed-base", requireRole(allCrm), controller.getAccountInstalledBase);
 router.get("/accounts/:id/plans", requireRole(allCrm), controller.listAccountPlans);
 router.post("/accounts/:id/plans", requireRole(crmAll), controller.createAccountPlan);
 router.put("/accounts/:id/plans/:planId", requireRole(crmAll), controller.updateAccountPlan);
@@ -97,6 +105,8 @@ router.delete("/contacts/:id", requireRole(crmAll), controller.softDeleteContact
 // Leads
 router.get("/leads", requireRole(allCrm), controller.listLeads);
 router.post("/leads", requireRole(crmAll), controller.createLead);
+// Va antes de /leads/:id.
+router.get("/leads/duplicates", requireRole(allCrm), controller.findLeadDuplicates);
 router.get("/leads/:id", requireRole(allCrm), controller.getLeadById);
 router.put("/leads/:id", requireRole(crmAll), controller.updateLead);
 router.delete("/leads/:id", requireRole(crmAll), controller.softDeleteLead);

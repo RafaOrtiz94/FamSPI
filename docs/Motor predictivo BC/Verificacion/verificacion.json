@@ -1,0 +1,323 @@
+{
+ "fecha": "2026-10-16T21:36:18.674Z",
+ "casos": [
+  {
+   "caso": "HGP Puyo 2025",
+   "compared": 73,
+   "excludedUnitSuspect": [
+    "PreciControl Tumor Marker Elec"
+   ],
+   "engine": {
+    "compared": 73,
+    "withinTolerance": 28,
+    "error": 0.6256,
+    "totalDeviation": 0.2859
+   },
+   "specialist": {
+    "compared": 73,
+    "withinTolerance": 27,
+    "error": 0.71,
+    "totalDeviation": 0.1157
+   },
+   "byType": {
+    "calibrador": {
+     "real": 56.14,
+     "engine": {
+      "compared": 36,
+      "withinTolerance": 18,
+      "error": 0.757,
+      "totalDeviation": 0.3538
+     },
+     "specialist": {
+      "compared": 36,
+      "withinTolerance": 18,
+      "error": 0.7784,
+      "totalDeviation": 0.425
+     }
+    },
+    "control": {
+     "real": 83.15,
+     "engine": {
+      "compared": 19,
+      "withinTolerance": 3,
+      "error": 0.6488,
+      "totalDeviation": -0.1461
+     },
+     "specialist": {
+      "compared": 19,
+      "withinTolerance": 7,
+      "error": 0.6026,
+      "totalDeviation": 0.0343
+     }
+    },
+    "material": {
+     "real": 177.99,
+     "engine": {
+      "compared": 18,
+      "withinTolerance": 7,
+      "error": 0.5733,
+      "totalDeviation": 0.4664
+     },
+     "specialist": {
+      "compared": 18,
+      "withinTolerance": 2,
+      "error": 0.7386,
+      "totalDeviation": 0.0562
+     }
+    }
+   },
+   "referenceSources": [
+    "HJMVI Tena",
+    "HOSPITAL GENERAL LATACUNGA"
+   ],
+   "inProgress": false,
+   "reagentDemand": {
+    "reagents": 67,
+    "plannedPerMonth": 15867,
+    "realPerMonth": 8607,
+    "ratio": 0.542,
+    "months": 8.26,
+    "file": "2da ENTREGA INMUNOQUIMICA HGP  al 08-06-2026  - DETERMINACIONES EFECTIVAS.xlsx"
+   },
+   "archivo": "C:\\Users\\Departamento de TI\\Desktop\\PROYECTOS\\FamSPI\\docs\\Motor predictivo BC\\Verificacion\\Verificacion motor - HGP Puyo 2025.xlsx",
+   "comprobacion": {
+    "file": "C:\\Users\\Departamento de TI\\Desktop\\PROYECTOS\\FamSPI\\docs\\Motor predictivo BC\\Verificacion\\Verificacion motor - HGP Puyo 2025.xlsx",
+    "rowsWritten": 82,
+    "mismatches": 0
+   }
+  },
+  {
+   "caso": "HGP Puyo 2026",
+   "compared": 0,
+   "excludedUnitSuspect": [],
+   "engine": {
+    "compared": 0,
+    "withinTolerance": 0,
+    "error": null,
+    "totalDeviation": null
+   },
+   "specialist": {
+    "compared": 0,
+    "withinTolerance": 0,
+    "error": null,
+    "totalDeviation": null
+   },
+   "byType": {
+    "calibrador": {
+     "real": 0,
+     "engine": {
+      "compared": 0,
+      "withinTolerance": 0,
+      "error": null,
+      "totalDeviation": null
+     },
+     "specialist": {
+      "compared": 0,
+      "withinTolerance": 0,
+      "error": null,
+      "totalDeviation": null
+     }
+    },
+    "control": {
+     "real": 0,
+     "engine": {
+      "compared": 0,
+      "withinTolerance": 0,
+      "error": null,
+      "totalDeviation": null
+     },
+     "specialist": {
+      "compared": 0,
+      "withinTolerance": 0,
+      "error": null,
+      "totalDeviation": null
+     }
+    },
+    "material": {
+     "real": 0,
+     "engine": {
+      "compared": 0,
+      "withinTolerance": 0,
+      "error": null,
+      "totalDeviation": null
+     },
+     "specialist": {
+      "compared": 0,
+      "withinTolerance": 0,
+      "error": null,
+      "totalDeviation": null
+     }
+    }
+   },
+   "referenceSources": [
+    "HGP Puyo 2025 (historial propio)",
+    "HJMVI Tena",
+    "HOSPITAL GENERAL LATACUNGA"
+   ],
+   "inProgress": true,
+   "reagentDemand": null,
+   "archivo": "C:\\Users\\Departamento de TI\\Desktop\\PROYECTOS\\FamSPI\\docs\\Motor predictivo BC\\Verificacion\\Verificacion motor - HGP Puyo 2026.xlsx",
+   "comprobacion": {
+    "file": "C:\\Users\\Departamento de TI\\Desktop\\PROYECTOS\\FamSPI\\docs\\Motor predictivo BC\\Verificacion\\Verificacion motor - HGP Puyo 2026.xlsx",
+    "rowsWritten": 80,
+    "mismatches": 0
+   }
+  },
+  {
+   "caso": "HJMVI Tena",
+   "compared": 51,
+   "excludedUnitSuspect": [
+    "ISE Standard low 10x3ML",
+    "ISE Standard high 10x3ML"
+   ],
+   "engine": {
+    "compared": 51,
+    "withinTolerance": 15,
+    "error": 0.3308,
+    "totalDeviation": -0.0158
+   },
+   "specialist": {
+    "compared": 51,
+    "withinTolerance": 11,
+    "error": 0.5546,
+    "totalDeviation": 0.2578
+   },
+   "byType": {
+    "calibrador": {
+     "real": 60.03,
+     "engine": {
+      "compared": 17,
+      "withinTolerance": 8,
+      "error": 0.5506,
+      "totalDeviation": 0.0828
+     },
+     "specialist": {
+      "compared": 17,
+      "withinTolerance": 4,
+      "error": 0.947,
+      "totalDeviation": 0.5659
+     }
+    },
+    "control": {
+     "real": 64.88,
+     "engine": {
+      "compared": 10,
+      "withinTolerance": 3,
+      "error": 0.4559,
+      "totalDeviation": 0.3255
+     },
+     "specialist": {
+      "compared": 10,
+      "withinTolerance": 4,
+      "error": 0.4516,
+      "totalDeviation": 0.1714
+     }
+    },
+    "material": {
+     "real": 511.12,
+     "engine": {
+      "compared": 24,
+      "withinTolerance": 4,
+      "error": 0.2891,
+      "totalDeviation": -0.0707
+     },
+     "specialist": {
+      "compared": 24,
+      "withinTolerance": 3,
+      "error": 0.5216,
+      "totalDeviation": 0.2326
+     }
+    }
+   },
+   "referenceSources": [
+    "HGP Puyo 2025",
+    "HOSPITAL GENERAL LATACUNGA"
+   ],
+   "inProgress": false,
+   "reagentDemand": null,
+   "archivo": "C:\\Users\\Departamento de TI\\Desktop\\PROYECTOS\\FamSPI\\docs\\Motor predictivo BC\\Verificacion\\Verificacion motor - HJMVI Tena.xlsx",
+   "comprobacion": {
+    "file": "C:\\Users\\Departamento de TI\\Desktop\\PROYECTOS\\FamSPI\\docs\\Motor predictivo BC\\Verificacion\\Verificacion motor - HJMVI Tena.xlsx",
+    "rowsWritten": 114,
+    "mismatches": 0
+   }
+  },
+  {
+   "caso": "HOSPITAL GENERAL LATACUNGA",
+   "compared": 82,
+   "excludedUnitSuspect": [
+    "ISE cleaning solution Sys Clean",
+    "A4 PRINTER PAPER"
+   ],
+   "engine": {
+    "compared": 82,
+    "withinTolerance": 17,
+    "error": 0.6628,
+    "totalDeviation": -0.0604
+   },
+   "specialist": {
+    "compared": 82,
+    "withinTolerance": 24,
+    "error": 0.5864,
+    "totalDeviation": 0.1201
+   },
+   "byType": {
+    "calibrador": {
+     "real": 192.63,
+     "engine": {
+      "compared": 31,
+      "withinTolerance": 9,
+      "error": 0.7429,
+      "totalDeviation": -0.1902
+     },
+     "specialist": {
+      "compared": 31,
+      "withinTolerance": 9,
+      "error": 0.5145,
+      "totalDeviation": -0.0448
+     }
+    },
+    "control": {
+     "real": 239.2,
+     "engine": {
+      "compared": 24,
+      "withinTolerance": 1,
+      "error": 0.9292,
+      "totalDeviation": 0.0368
+     },
+     "specialist": {
+      "compared": 24,
+      "withinTolerance": 6,
+      "error": 0.5931,
+      "totalDeviation": 0.4089
+     }
+    },
+    "material": {
+     "real": 510.08,
+     "engine": {
+      "compared": 27,
+      "withinTolerance": 7,
+      "error": 0.5077,
+      "totalDeviation": -0.057
+     },
+     "specialist": {
+      "compared": 27,
+      "withinTolerance": 9,
+      "error": 0.6105,
+      "totalDeviation": 0.0469
+     }
+    }
+   },
+   "referenceSources": [
+    "HGP Puyo 2025",
+    "HJMVI Tena"
+   ],
+   "archivo": "C:\\Users\\Departamento de TI\\Desktop\\PROYECTOS\\FamSPI\\docs\\Motor predictivo BC\\Verificacion\\Verificacion motor - HOSPITAL GENERAL LATACUNGA.xlsx",
+   "comprobacion": {
+    "file": "C:\\Users\\Departamento de TI\\Desktop\\PROYECTOS\\FamSPI\\docs\\Motor predictivo BC\\Verificacion\\Verificacion motor - HOSPITAL GENERAL LATACUNGA.xlsx",
+    "rowsWritten": 114,
+    "mismatches": 0
+   }
+  }
+ ]
+}

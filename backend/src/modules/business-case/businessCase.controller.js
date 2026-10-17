@@ -7,6 +7,11 @@ const businessCaseService = require("./businessCase.service");
 const equipmentSelectionService = require("./equipmentSelection.service");
 const determinationsService = require("./determinations.service");
 const investmentsService = require("./investments.service");
+const { isInvestmentFlowClosed } = require("./businessCaseInvestmentFlow");
+const {
+  isWorkspaceClosedByFeasibility,
+  canEditGeneralWhenWorkspaceClosed,
+} = require("./businessCaseGeneralReopen");
 const dispatchWorkspaceService = require("./bcDispatchWorkspace.service");
 const bcLabEnvironmentService = require("./bcLabEnvironment.service");
 const bcLabProductParametersService = require("./bcLabProductParameters.service");
@@ -172,6 +177,9 @@ const feasibilityDecisionSchema = Joi.object({
 const offerDecisionSchema = Joi.object({
   decision: Joi.string().trim().valid("accepted", "rejected").required(),
   reason: Joi.string().allow("").max(2000).optional(),
+});
+const extraordinaryInvestmentReopenSchema = Joi.object({
+  reason: Joi.string().trim().max(1000).allow("").default(""),
 });
 
 const SECTION_ALIASES = {
@@ -1635,7 +1643,7 @@ async function notifyInvestmentQuotationRequested({ businessCaseId, actor, selec
         `Codigo: ${itemCode}. Categoria: ${category}. Cantidad requerida: ${quantity}. ` +
         `Caracteristicas: ${characteristics}. Observaciones: ${observations}. ` +
         "Debes gestionar tres cotizaciones de proveedores diferentes o una cotizacion de un proveedor validado. " +
-        "Sube la(s) cotización(es) en el Business Case, en el ítem asignado (Precios financieros y operativos); Jefe Financiero registrará el valor. No tendrás acceso a otros ítems ni secciones.",
+        "Sube la(s) cotización(es) en el Business Case, en el ítem asignado (Precios de inversiones); Jefe Financiero registrará el valor. No tendrás acceso a otros ítems ni secciones.",
       data: {
         business_case_id: businessCaseId,
         target_path: targetPath,
@@ -2109,6 +2117,21 @@ async function assertSectionEditable(businessCaseId, section, user) {
     throw error;
   }
 
+  if (section === "general" && String(user?.role || "").trim().toLowerCase() === "jefe_comercial") {
+    const [businessCase, ownershipInfo] = await Promise.all([
+      businessCaseService.getBusinessCaseById(businessCaseId),
+      BusinessCaseDataOwnership.getOwnershipInfo(businessCaseId),
+    ]);
+    if (canEditGeneralWhenWorkspaceClosed({
+      businessCase,
+      userRole: user?.role,
+      lockInfo,
+      ownershipEntry: ownershipInfo?.general,
+    })) {
+      return;
+    }
+  }
+
   // Determinations tiene un gate propio basado en documento estadistico,
   // fase y subseccion. Los handlers de consumo validan ese gate justo despues.
   if (section === "determinations") return;
@@ -2278,7 +2301,21 @@ async function update(req, res) {
         );
       }
     }
-    res.json({ ok: true, data: refreshed });
+    // Datos Generales guardados en SPI -> sus celdas en la hoja BC existente (igual que los
+    // precios de inversiones). Si falla, el guardado ya quedo hecho y se informa el motivo.
+    let sheetSync = null;
+    if (hasGeneralSavePayload(value)) {
+      try {
+        sheetSync = await sheetGenerationService.syncGeneralDataToSheet(req.params.id);
+      } catch (syncError) {
+        logger.warn(
+          { error: syncError?.message || String(syncError), businessCaseId: req.params.id },
+          "No se pudo sincronizar datos generales a Sheets",
+        );
+        sheetSync = { synced: false, error: syncError?.message || "No se pudo sincronizar la hoja", code: syncError?.code || null };
+      }
+    }
+    res.json({ ok: true, data: refreshed, sheet_sync: sheetSync });
   } catch (err) {
     logger.error(err);
     res.status(err.status || 500).json({ ok: false, message: err.message || "Error actualizando Business Case" });
@@ -2539,6 +2576,14 @@ async function submitFeasibilityDecision(req, res) {
         reason: value.notes,
         actorEmail: req.user?.email || null,
       });
+      try {
+        await crmPurchaseSyncService.syncBusinessCaseNotFeasible(req.params.id, req.user, value.notes);
+      } catch (crmSyncError) {
+        logger.warn(
+          { crmSyncError, businessCaseId: req.params.id },
+          "No se pudo sincronizar la no factibilidad del business case con CRM",
+        );
+      }
     }
     res.json({ ok: true, data: updated });
   } catch (err) {
@@ -2890,7 +2935,7 @@ async function closeInvestmentsWithoutAdditionalItems(req, res) {
         eventKey: "investments_closed_without_items",
         title: "Inversiones cerradas sin adicionales: revisar factibilidad",
         message:
-          "El Business Case fue cerrado sin inversiones adicionales. Precios financieros y operativos quedaron cerrados automaticamente porque no aplican.",
+          "El Business Case fue cerrado sin inversiones adicionales. Los precios de inversiones quedaron cerrados automaticamente porque no aplican.",
         actorEmail: req.user?.email || null,
         excludeActor: true,
       });
@@ -2912,6 +2957,62 @@ async function closeInvestmentsWithoutAdditionalItems(req, res) {
     });
   } catch (error) {
     logger.error({ error: error.message }, "Error closing investments without additional items");
+    res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
+  }
+}
+
+async function reopenExtraordinaryInvestments(req, res) {
+  try {
+    const { id } = req.params;
+    const { error, value } = extraordinaryInvestmentReopenSchema.validate(req.body || {});
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    await businessCaseService.assertModernBusinessCase(id);
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    if (!bc) return res.status(404).json({ ok: false, message: "Business Case no encontrado." });
+
+    const role = resolveRequestRole(req);
+    const allowedRoles = new Set([
+      ...INVESTMENT_EDIT_ROLES,
+      ...INVESTMENT_VALUES_OP_ROLES,
+      ...INVESTMENT_VALUES_FIN_ROLES,
+      "gerencia",
+      "gerencia_general",
+    ]);
+    if (!allowedRoles.has(role)) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para reabrir inversiones extraordinarias.",
+        code: "EXTRAORDINARY_INVESTMENT_REOPEN_ROLE_REQUIRED",
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    const currentState = String(bc?.canonical_state || bc?.bc_stage || "draft").toUpperCase();
+    const existingInvestments = preflowService.toObject(bc?.modern_bc_metadata)?.investments || {};
+    const extraordinaryReopen = {
+      active: true,
+      reopened_at: nowIso,
+      reopened_by_email: req.user?.email || null,
+      reopened_by_role: role,
+      reason: value.reason || null,
+    };
+
+    await preflowService.updateBusinessCaseMetadata(id, {
+      investments: { ...existingInvestments, extraordinary_reopen: extraordinaryReopen },
+    });
+    await BusinessCaseDataOwnership.recordSectionAuditEvent(
+      id,
+      "investments",
+      "extraordinary_reopened",
+      req.user,
+      currentState,
+      { source: "extraordinary_investments_reopen", ...extraordinaryReopen },
+    );
+
+    res.json({ ok: true, data: { reopened: true, extraordinary_reopen: extraordinaryReopen } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error reopening extraordinary investments");
     res.status(error.status || 500).json({ ok: false, message: error.message, code: error.code || null });
   }
 }
@@ -4249,13 +4350,11 @@ async function getUIGuidance(req, res) {
 
     const investmentSelections = await investmentsService.getInvestmentSelections(id);
     const hasInvestmentsData = Array.isArray(investmentSelections) && investmentSelections.some((i) => i.selected);
-    const investmentsMetadata = preflowService.toObject(bc?.modern_bc_metadata)?.investments || {};
-    // Inversiones adicionales no aplica a BC privados -- se marca cerrada
-    // desde el inicio en vez de esperar a que alguien la cierre a mano con
-    // el boton "sin inversiones adicionales" (mismo flag que ya usa ese
-    // cierre manual, ver closeInvestmentsWithoutAdditionalItems mas abajo).
-    const closedWithoutInvestments =
-      Boolean(investmentsMetadata?.no_additional_investments) || !isPublicBusinessCaseFlow;
+    const businessCaseMetadata = preflowService.toObject(bc?.modern_bc_metadata);
+    const investmentsMetadata = businessCaseMetadata?.investments || {};
+    // Inversiones adicionales aplica tanto a BC publicos como privados. Solo
+    // el cierre manual explicito marca la seccion como cerrada sin items.
+    const closedWithoutInvestments = isInvestmentFlowClosed(businessCaseMetadata);
     const investmentCartStatus = resolveInvestmentCartStatus(bc);
     let financialInvestmentValues = [];
     try {
@@ -4287,7 +4386,7 @@ async function getUIGuidance(req, res) {
         : null;
     const hasFeasibilityExport = Boolean(feasibilityData?.export_excel?.at);
     const hasFeasibilityDecision = Boolean(feasibilityDecision?.decided_at);
-    const workspaceClosedByFeasibility = Boolean(feasibilityData?.closed || hasFeasibilityDecision);
+    const workspaceClosedByFeasibility = isWorkspaceClosedByFeasibility(bc);
     const isFeasibleDecision = Boolean(feasibilityDecision?.is_feasible);
     let offerWorkspace = null;
     try {
@@ -4301,6 +4400,13 @@ async function getUIGuidance(req, res) {
       }
     }
     const lockMap = await BusinessCaseDataOwnership.getLockStatus(id);
+    const generalOwnership = getOwnershipEntry("general");
+    const canEditClosedGeneral = canEditGeneralWhenWorkspaceClosed({
+      businessCase: bc,
+      userRole,
+      lockInfo: lockMap?.general,
+      ownershipEntry: generalOwnership,
+    });
     const currentStatDocument = await determinationsGateService.getCurrentDocument(id);
     const determinationsGate = determinationsGateService.buildGateInfo({
       businessCase: bc,
@@ -4309,8 +4415,7 @@ async function getUIGuidance(req, res) {
     });
     const canEditInvestments = Boolean(
       determinationsGate.documentUploaded
-      && hasInvestmentEditRole(userRole, req.user?.extra_roles)
-      && isPublicBusinessCaseFlow,
+      && hasInvestmentEditRole(userRole, req.user?.extra_roles),
     );
     const canEditDeterminations = Boolean(determinationsGate.permissions.canEditDeterminations);
     const offerGroups = Array.isArray(offerWorkspace?.offer_groups) ? offerWorkspace.offer_groups : [];
@@ -4421,6 +4526,7 @@ async function getUIGuidance(req, res) {
     if (workspaceClosedByFeasibility) {
       Object.keys(ownershipRules).forEach((sectionKey) => {
         // dispatch_workspace, investments y determinations tienen reglas propias post-factibilidad.
+        if (sectionKey === 'general' && canEditClosedGeneral) return;
         if (sectionKey === 'dispatch_workspace') return;
         if (sectionKey === 'investments') return;
         if (sectionKey === 'determinations') return;
@@ -4480,7 +4586,17 @@ async function getUIGuidance(req, res) {
       no_additional_investments: closedWithoutInvestments,
       closed_without_investments_at: investmentsMetadata?.closed_without_investments_at || null,
       prices_closed_without_investments: Boolean(investmentsMetadata?.prices_closed_without_investments),
+      extraordinary_reopen: investmentsMetadata?.extraordinary_reopen || null,
     };
+    // La reapertura extraordinaria es una excepcion explicita al cierre
+    // "sin inversiones". Se propaga a los valores para que una pantalla
+    // previamente completada no conserve un mensaje de cierre obsoleto.
+    ["investment_values_op", "investment_values_fin"].forEach((sectionKey) => {
+      ownershipRules[sectionKey].metadata = {
+        ...(ownershipRules[sectionKey].metadata || {}),
+        extraordinary_reopen: investmentsMetadata?.extraordinary_reopen || null,
+      };
+    });
 
     const ruleEntries = [
       ...Object.entries(ownershipRules)
@@ -4546,6 +4662,7 @@ async function getUIGuidance(req, res) {
     const permissions = {
       userRole: userRole,
       canEdit: !workspaceClosedByFeasibility,
+      canEditGeneral: !workspaceClosedByFeasibility || canEditClosedGeneral,
       canCompleteSections: !workspaceClosedByFeasibility,
       canPromoteStage: !workspaceClosedByFeasibility && ['gerencia', 'jefe_comercial', 'jefe_operaciones'].includes(userRole),
       canAddObservations: true,
@@ -5238,6 +5355,24 @@ async function registerEnvironmentInspectionResult(req, res) {
   }
 }
 
+// PRODUCTO A ENTREGAR distinto de la prediccion del motor sin justificar: no se cierra la subseccion.
+const SUBSECTION_PREDICTED_TYPE = { controles: "control", calibradores: "calibrador", materiales: "material" };
+async function sheetDifferencesResponse(businessCaseId, subsections) {
+  const itemTypes = subsections.map((key) => SUBSECTION_PREDICTED_TYPE[key]).filter(Boolean);
+  if (!itemTypes.length) return null;
+  const pending = await require("./determinationPredictions.service").pendingJustifications(businessCaseId, itemTypes);
+  if (!pending.length) return null;
+  return {
+    ok: false,
+    code: "SHEET_DIFFERENCE_UNJUSTIFIED",
+    message: `Justifique antes de cerrar: ${pending.length} producto(s) tienen en PRODUCTO A ENTREGAR una cantidad distinta a la prediccion del motor (${pending.slice(0, 3).map((item) => item.name).join(", ")}${pending.length > 3 ? ", ..." : ""}).`,
+    pending: pending.map((item) => ({
+      equipmentId: item.equipmentId, itemType: item.itemType, supplierCode: item.supplierCode, name: item.name,
+      predicted: item.predicted, sheetPlanned: item.sheetPlanned,
+    })),
+  };
+}
+
 async function lockDeterminationsSubsection(req, res) {
   try {
     const { id } = req.params;
@@ -5257,6 +5392,8 @@ async function lockDeterminationsSubsection(req, res) {
     await businessCaseService.syncConsumptionQuantitiesFromSheet(id, {
       itemTypes: DETERMINATIONS_SHEET_ITEM_TYPES[subsection],
     });
+    const unjustified = await sheetDifferencesResponse(id, [subsection]);
+    if (unjustified) return res.status(409).json(unjustified);
     const currentConsumption = await businessCaseService.getConsumptionItems(id);
     const items = Array.isArray(currentConsumption?.items) ? currentConsumption.items : [];
     const scoped = items.filter((item) => subsectionFromConsumptionType(item?.type) === subsection);
@@ -5409,6 +5546,9 @@ async function lockAllDeterminationsTechnicalSubsections(req, res) {
         itemTypes: DETERMINATIONS_SHEET_ITEM_TYPES[subsection],
       });
     }
+
+    const unjustified = await sheetDifferencesResponse(id, pendingSubsections);
+    if (unjustified) return res.status(409).json(unjustified);
 
     // Todas listas: proteger celdas en el Sheet (subsecciones sin items se
     // saltan, no hay nada que proteger) y marcar el lock.
@@ -5792,6 +5932,7 @@ async function renewDeterminationsCommercialWindow(req, res) {
   }
 }
 
+// Formato de estadistica por equipo (Excel) para que el comercial lo llene y lo suba.
 async function uploadDeterminationsStatDocument(req, res) {
   let idempotencySession = null;
   try {
@@ -5945,20 +6086,41 @@ async function uploadDeterminationsStatDocument(req, res) {
       ? { ...metadata.determinations_gate }
       : {};
 
-    const driveTarget = await ensureBusinessCaseDriveFolder({
-      businessCaseId: id,
-      clientName: refreshedAfterProcess?.client_name || "Cliente",
-      bcPurchaseType: refreshedAfterProcess?.bc_purchase_type || "public",
-      existingFolderId: refreshedAfterProcess?.drive_folder_id || null,
-      persist: true,
-    });
-    const determinationsFolder = await ensureFolder("Determinaciones", driveTarget.folderId);
-    const uploaded = await uploadBase64File(
-      file.originalname || `documento-estadistico-${id}.pdf`,
-      Buffer.from(file.buffer).toString("base64"),
-      file.mimetype || "application/octet-stream",
-      determinationsFolder?.id,
-    );
+    let uploaded = null;
+    try {
+      const driveTarget = await ensureBusinessCaseDriveFolder({
+        businessCaseId: id,
+        clientName: refreshedAfterProcess?.client_name || "Cliente",
+        bcPurchaseType: refreshedAfterProcess?.bc_purchase_type || "public",
+        existingFolderId: refreshedAfterProcess?.drive_folder_id || null,
+        persist: true,
+      });
+      const determinationsFolder = await ensureFolder("Determinaciones", driveTarget.folderId);
+      uploaded = await uploadBase64File(
+        file.originalname || `documento-estadistico-${id}.pdf`,
+        Buffer.from(file.buffer).toString("base64"),
+        file.mimetype || "application/octet-stream",
+        determinationsFolder?.id,
+      );
+    } catch (driveError) {
+      // El staging local corre sin credenciales de Google (scripts/staging_local.ps1): ahi el
+      // documento queda registrado sin copia en Drive para poder probar el flujo. En produccion
+      // un fallo de Drive sigue cortando la carga.
+      if (process.env.NODE_ENV !== "staging") throw driveError;
+      logger.warn(
+        { error: driveError.message, businessCaseId: id },
+        "Staging sin Google Drive: el documento estadistico se registra sin copia en Drive",
+      );
+      uploaded = { id: `staging-local-${fileHash.slice(0, 16)}`, name: file.originalname || null, webViewLink: null };
+      // Copia local para poder revisar lo que se subio (en staging no hay Drive).
+      try {
+        const localDir = require("path").join(require("os").tmpdir(), "famspi-staging-documents");
+        require("fs").mkdirSync(localDir, { recursive: true });
+        require("fs").writeFileSync(require("path").join(localDir, `${fileHash.slice(0, 16)}-${file.originalname || "documento"}`), file.buffer);
+      } catch (copyError) {
+        logger.warn({ error: copyError.message }, "Staging: no se pudo guardar la copia local del documento");
+      }
+    }
 
     const now = new Date();
     const deadlineAt = new Date(
@@ -6343,11 +6505,12 @@ async function unlockSection(req, res) {
     const { id, section } = req.params;
     const canonicalSection = SECTION_ALIASES[section] || section;
     const userRole = String(req.user?.role || "").toLowerCase();
+    let businessCase = null;
 
     // BUG-03: backoffice solo puede desbloquear secciones en BC de compra PRIVADA
     if (BACKOFFICE_LOCK_ROLES.has(userRole)) {
-      const bc = await businessCaseService.getBusinessCaseById(id);
-      const purchaseType = String(bc?.bc_purchase_type || bc?.purchase_type || bc?.type || "").toLowerCase();
+      businessCase = await businessCaseService.getBusinessCaseById(id);
+      const purchaseType = String(businessCase?.bc_purchase_type || businessCase?.purchase_type || businessCase?.type || "").toLowerCase();
       if (!PRIVATE_PURCHASE_TYPES.has(purchaseType)) {
         return res.status(403).json({
           ok: false,
@@ -6356,8 +6519,19 @@ async function unlockSection(req, res) {
       }
     }
 
+    if (canonicalSection === "general" && !businessCase) {
+      businessCase = await businessCaseService.getBusinessCaseById(id);
+    }
+
+    const allowEditWhenWorkspaceClosed = Boolean(
+      canonicalSection === "general"
+      && userRole === "jefe_comercial"
+      && isWorkspaceClosedByFeasibility(businessCase),
+    );
+
     await BusinessCaseDataOwnership.unlockSection(id, canonicalSection, req.user, null, {
       source: "workspace",
+      allow_edit_when_workspace_closed: allowEditWhenWorkspaceClosed,
     });
     res.json({ ok: true, data: { section: canonicalSection, locked: false } });
   } catch (error) {
@@ -7203,7 +7377,7 @@ async function notifyQuotationUploaded({ businessCaseId, itemName, actorEmail })
         customTitle: `Cotización recibida: ${itemName}`,
         customMessage:
           `${actorEmail || "El cotizador asignado"} subió la cotización de ${itemName} para el Business Case de ${clientName}. ` +
-          "Revisa el archivo en Precios financieros y operativos y registra el valor.",
+          "Revisa el archivo en Precios de inversiones y registra el valor.",
         data: {
           business_case_id: businessCaseId,
           target_path: targetPath,
@@ -7441,6 +7615,7 @@ module.exports = {
   createInvestmentCatalogItem,
   saveInvestmentSelection,
   closeInvestmentsWithoutAdditionalItems,
+  reopenExtraordinaryInvestments,
   searchReservableTiAssets,
   getAllTiAssetReservations,
   getTiAssetReservations,

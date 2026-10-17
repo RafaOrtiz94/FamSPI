@@ -1,7 +1,8 @@
 // Alta y edición de lead. No se cierra al hacer clic fuera, para no perder lo escrito.
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import Modal from "../../../core/ui/components/Modal";
-import { createLead, updateLead } from "../../../core/api/crmFamApi";
+import { createLead, fetchLeadDuplicates, updateLead } from "../../../core/api/crmFamApi";
 import ECUADOR_LOCATIONS from "../../../data/ecuadorGeography";
 import { Btn, ErrorNote, Field, SelectInput, TextArea, TextInput } from "../ui/kit";
 import { errorMessage } from "../ui/format";
@@ -54,7 +55,8 @@ export default function LeadFormModal({ lead, onClose, onSaved }) {
   }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const set = (name) => (e) => setForm((f) => ({ ...f, [name]: e.target.value }));
+  const [dups, setDups] = useState(null); // coincidencias ya mostradas; al cambiar los datos se vuelve a revisar
+  const set = (name) => (e) => { setDups(null); setForm((f) => ({ ...f, [name]: e.target.value })); };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -75,6 +77,17 @@ export default function LeadFormModal({ lead, onClose, onSaved }) {
       ...(form.owner_user_id ? { owner_user_id: Number(form.owner_user_id) } : {}),
     };
     try {
+      // Antes de crear: ¿ya existe este lead, su cuenta o el cliente? Se avisa una vez; el vendedor decide.
+      if (!editing && !dups) {
+        const found = await fetchLeadDuplicates({
+          first_name: payload.first_name, last_name: payload.last_name || undefined,
+          company_name: payload.company_name || undefined, email: payload.email || undefined, phone: payload.phone || undefined,
+        }).catch(() => null);
+        if (found && (found.leads.length || found.accounts.length || found.clients.length)) {
+          setDups(found);
+          return;
+        }
+      }
       const saved = editing ? await updateLead(lead.id, payload) : await createLead(payload);
       onSaved(saved);
     } catch (err) {
@@ -88,6 +101,26 @@ export default function LeadFormModal({ lead, onClose, onSaved }) {
     <Modal open title={editing ? "Editar lead" : "Nuevo lead"} onClose={onClose} maxWidth="max-w-2xl" disableClose={saving}>
       <form onSubmit={submit} noValidate>
         <ErrorNote message={error} className="mb-4" />
+        {dups && (
+          <div className="mb-4 rounded-lg bg-fam-warning-bg px-3 py-2.5 text-[13px] text-fam-text" role="alert">
+            <p className="font-semibold text-fam-warning">Puede que ya exista. Revisa antes de crear otro:</p>
+            <ul className="mb-0 mt-1.5 list-none space-y-1 pl-0">
+              {dups.leads.map((l) => (
+                <li key={`l-${l.id}`}>
+                  Lead <Link to={`/dashboard/crm-fam/leads?sel=${l.id}`} target="_blank" rel="noopener noreferrer" className="text-fam-action underline underline-offset-2">{[l.first_name, l.last_name].filter(Boolean).join(" ") || l.company_name}</Link>
+                  {l.company_name ? ` · ${l.company_name}` : ""} · {leadStatus(l.status).label.toLowerCase()} · coincide por {l.match}{l.owner_name ? ` · de ${l.owner_name}` : ""}
+                </li>
+              ))}
+              {dups.accounts.map((a) => (
+                <li key={`a-${a.id}`}>
+                  Cuenta <Link to={`/dashboard/crm-fam/accounts/${a.id}`} target="_blank" rel="noopener noreferrer" className="text-fam-action underline underline-offset-2">{a.account_name}</Link>{a.ruc ? ` · RUC ${a.ruc}` : ""}
+                </li>
+              ))}
+              {dups.clients.map((c) => <li key={`c-${c.id}`}>Cliente registrado: {c.name}{c.ruc ? ` · ${c.ruc}` : ""}</li>)}
+            </ul>
+            <p className="mb-0 mt-1.5 text-fam-muted">Si es otro, pulsa “Crear de todos modos”.</p>
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Nombre">{(p) => <TextInput {...p} value={form.first_name} onChange={set("first_name")} maxLength={100} autoFocus />}</Field>
           <Field label="Apellido" optional>{(p) => <TextInput {...p} value={form.last_name} onChange={set("last_name")} maxLength={100} />}</Field>
@@ -149,7 +182,7 @@ export default function LeadFormModal({ lead, onClose, onSaved }) {
         </div>
         <div className="mt-6 flex flex-wrap justify-end gap-2">
           <Btn onClick={onClose} disabled={saving}>Cancelar</Btn>
-          <Btn type="submit" variant="primary" loading={saving}>{saving ? "Guardando…" : editing ? "Guardar cambios" : "Crear lead"}</Btn>
+          <Btn type="submit" variant="primary" loading={saving}>{saving ? "Guardando…" : editing ? "Guardar cambios" : dups ? "Crear de todos modos" : "Crear lead"}</Btn>
         </div>
       </form>
     </Modal>

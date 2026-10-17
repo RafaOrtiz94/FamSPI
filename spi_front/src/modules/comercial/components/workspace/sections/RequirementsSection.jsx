@@ -19,6 +19,7 @@ const defaultForm = {
   deadlineMonths: "",
   projectedDeadlineMonths: "",
   deliveryType: "total",
+  partialDeliveries: "",
   effectiveDetermination: false,
   observations: ""
 };
@@ -70,6 +71,7 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
           projectedDeadlineMonths: requirements.projected_deadline_months ?? "",
           observations: requirements.observations ?? "",
           deliveryType: deliveries.delivery_type || "total",
+          partialDeliveries: deliveries.partial_deliveries ?? "",
           effectiveDetermination: deliveries.effective_determination ?? false
         };
         setForm(loaded);
@@ -102,6 +104,7 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
 
       await api.post(`/business-case/${bcId}/deliveries`, {
         delivery_type: form.deliveryType,
+        partial_deliveries: form.deliveryType === "partial_time" && form.partialDeliveries ? Number(form.partialDeliveries) : null,
         effective_determination: Boolean(form.effectiveDetermination)
       });
 
@@ -196,6 +199,23 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
               ))}
             </select>
           </div>
+
+          {form.deliveryType === "partial_time" && (
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-gray-700">Número de entregas parciales</label>
+              <input
+                type="number"
+                min={1}
+                value={form.partialDeliveries}
+                onChange={(e) => setForm((prev) => ({ ...prev, partialDeliveries: e.target.value }))}
+                className={inputClasses}
+                disabled={!isEditing}
+                placeholder="Ej. 4"
+                aria-label="Número de entregas parciales"
+              />
+              <span className="text-xs text-gray-500">Cada entrega va en presentaciones completas: el motor lo usa para el producto a entregar.</span>
+            </div>
+          )}
 
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">Determinación efectiva</label>

@@ -3,9 +3,9 @@
 // (Business Case o compra) y sus accesos directos; el recorrido de todas llega en una sola consulta.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { FiAlertTriangle, FiBriefcase, FiClock, FiExternalLink, FiFileText, FiMessageCircle, FiPlus, FiShoppingCart, FiUserPlus, FiUsers } from "react-icons/fi";
+import { FiAlertTriangle, FiBarChart2, FiBriefcase, FiClock, FiMove, FiExternalLink, FiFileText, FiMessageCircle, FiPlus, FiShoppingCart, FiUserPlus, FiUsers } from "react-icons/fi";
 import {
-  changeOpportunityStage, disqualifyLead, fetchAccounts, fetchActivities, fetchLeads, fetchOpportunities,
+  changeOpportunityStage, disqualifyLead, fetchAccounts, fetchActiveAccountPlans, fetchActivities, fetchLeads, fetchOpportunities,
   fetchOpportunityJourneys, fetchPipelineStages, promoteLeadToOpportunity, updateLead, updateOpportunity,
 } from "../../../core/api/crmFamApi";
 import { useAuth } from "../../../core/auth/AuthContext";
@@ -17,6 +17,8 @@ import {
   OpportunityFormModal, opportunitySource, PurchasePickerModal,
 } from "../components/OpportunityDialogs";
 import { JourneyPanel, JourneyStrip } from "../components/OpportunityJourney";
+import { CardIdentity, originOf, OriginLegend, PlansStrip } from "../components/FunnelPlans";
+import { LostColumn } from "../components/FunnelLost";
 import { ReasonDialog } from "../ui/dialogs";
 import {
   Badge, Btn, cx, DataTable, DefList, EmptyState, ErrorNote, FilterChip, IconBtn, Inspector, Menu, PageHeader, Panel,
@@ -39,6 +41,9 @@ const VIEWS = [
 
 // Oportunidad estancada: abierta y sin cambios en STALE_DAYS días o más (updated_at viene en la lista).
 const daysIdle = (o) => (o.updated_at ? Math.floor((Date.now() - new Date(o.updated_at).getTime()) / 86400000) : 0);
+// Días en la fase actual (stage_entered_at lo mantiene un trigger en la base).
+const STAGE_SLOW_DAYS = 30;
+const daysInStage = (o) => (o.stage_entered_at ? Math.max(0, Math.floor((Date.now() - new Date(o.stage_entered_at).getTime()) / 86400000)) : null);
 const isStale = (o) => o.status === "open" && daysIdle(o) >= STALE_DAYS;
 const leadName = (l) => (l.full_name || "").trim() || [l.first_name, l.last_name].filter(Boolean).join(" ") || l.company_name || `Lead ${l.lead_code || ""}`;
 const probabilityOf = (o, stage) => Number(o.probability_override ?? stage?.probability_default ?? o.probability_default ?? 0);
@@ -52,7 +57,7 @@ function Column({ title, count, total, tone, dropActive, onDragOver, onDragLeave
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cx(
-        "flex w-[288px] shrink-0 flex-col rounded-xl border transition-colors duration-100",
+        "flex w-[18rem] shrink-0 flex-col rounded-xl border transition-colors duration-100",
         dropActive ? "border-fam-action bg-fam-selected" : tone === "lead" ? "border-fam-border bg-fam-subtle" : "border-fam-border bg-fam-canvas",
       )}
     >
@@ -71,17 +76,40 @@ function Column({ title, count, total, tone, dropActive, onDragOver, onDragLeave
   );
 }
 
+// Business Case de la tarjeta (compras públicas y privadas en comodato): color según la factibilidad.
+const BC_STATE = {
+  done: ["factible", "text-fam-success"],
+  blocked: ["no factible", "text-fam-danger"],
+  current: ["en análisis", "text-fam-action"],
+  pending: ["pendiente", "text-fam-muted"],
+};
+function BusinessCaseIcon({ businessCase }) {
+  const [label, tone] = BC_STATE[businessCase.state] || BC_STATE.pending;
+  const title = `Business Case: ${label}`;
+  const cls = cx("inline-flex !h-7 !w-7 shrink-0 items-center justify-center rounded-lg transition-colors duration-100", tone);
+  if (!businessCase.id) {
+    return <span role="img" aria-label={title} title={title} className={cls}><FiBarChart2 className="h-4 w-4" aria-hidden="true" /></span>;
+  }
+  return (
+    <Link to={`/dashboard/business-case/workspace/${businessCase.id}`} aria-label={`${title}. Abrir`} title={`${title}. Abrir`} className={cx(cls, "hover:bg-fam-subtle")}>
+      <FiBarChart2 className="h-4 w-4" aria-hidden="true" />
+    </Link>
+  );
+}
+
 function OpportunityCard({ opp, journey, selected, stages, onOpen, onMove, onAction }) {
   const missing = missingFields(opp).length;
   const h = healthOf(opp.health_status);
   const tier = opp.account_classification ? accountClassification(opp.account_classification) : null;
   const act = (type) => () => onAction(type, opp);
+  const origin = originOf(opp);
   return (
     <article
       draggable
       onDragStart={(e) => { e.dataTransfer.setData("text/plain", opp.id); e.dataTransfer.effectAllowed = "move"; }}
       className={cx("rounded-lg border bg-fam-surface p-3", selected ? "border-fam-action ring-1 ring-fam-action" : "border-fam-border")}
     >
+      {origin && <span className="-mx-3 -mt-3 mb-2.5 block h-1 rounded-t-lg" style={{ backgroundColor: origin.color }} aria-hidden="true" />}
       <button type="button" onClick={() => onOpen(opp)} className="block w-full text-left">
         <span className="line-clamp-2 text-sm font-medium text-fam-text">{opp.name}</span>
         <span className="mt-1 flex items-center gap-1.5 text-[13px] text-fam-muted">
@@ -89,10 +117,12 @@ function OpportunityCard({ opp, journey, selected, stages, onOpen, onMove, onAct
           <span className="min-w-0 truncate">{opp.account_name || "Sin cuenta"}</span>
           {tier && <Badge tone={tier.tone} className="shrink-0">{tier.label}</Badge>}
         </span>
+        <CardIdentity opp={opp} />
       </button>
       <div className="mt-2 flex items-end justify-between gap-2">
         <div className="flex min-w-0 flex-wrap gap-1">
           {opp.health_status && opp.health_status !== "gray" && <Badge tone={h.tone}>{h.label}</Badge>}
+          {daysInStage(opp) >= 1 && <Badge tone={daysInStage(opp) >= STAGE_SLOW_DAYS ? "warning" : "neutral"}>{daysInStage(opp)} d en fase</Badge>}
           {isStale(opp) && <Badge tone="warning"><FiClock className="mr-1 h-3 w-3" aria-hidden="true" />{daysIdle(opp)} d sin movimiento</Badge>}
           {missing > 0 && <Badge tone="warning">Faltan {missing} dato{missing === 1 ? "" : "s"}</Badge>}
         </div>
@@ -101,19 +131,21 @@ function OpportunityCard({ opp, journey, selected, stages, onOpen, onMove, onAct
       <JourneyStrip journey={journey} />
       {/* Accesos directos de la tarjeta. "Mover" es la alternativa accesible al arrastre. */}
       <div className="mt-2 flex items-center justify-between gap-1 border-t border-fam-border pt-2">
-        <div className="flex">
-          <IconBtn icon={FiBriefcase} label={opp.account_id ? "Ver cuenta" : "Vincular cuenta"} className={cx("h-8 w-8", !opp.account_id && "text-fam-action")} onClick={act(opp.account_id ? "account-peek" : "account-link")} />
-          <IconBtn icon={FiMessageCircle} label="Escribir o llamar a un contacto de la cuenta" className="h-8 w-8" disabled={!opp.account_id} onClick={act("contacts")} />
-          <IconBtn icon={FiUserPlus} label="Agregar contacto" className="h-8 w-8" onClick={act("contact-new")} />
-          <IconBtn icon={FiShoppingCart} label="Requerimiento de compra" className="h-8 w-8" onClick={act("purchase")} />
-          <Link to={`${BASE}/opportunities/${opp.id}/blue-sheet`} aria-label="Abrir Blue Sheet" title="Abrir Blue Sheet" className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-fam-muted transition-colors duration-100 hover:bg-fam-subtle hover:text-fam-text">
+        <div className="flex min-w-0 flex-wrap">
+          <IconBtn icon={FiBriefcase} label={opp.account_id ? "Ver cuenta" : "Vincular cuenta"} className={cx("!h-7 !w-7", !opp.account_id && "text-fam-action")} onClick={act(opp.account_id ? "account-peek" : "account-link")} />
+          <IconBtn icon={FiMessageCircle} label="Escribir o llamar a un contacto de la cuenta" className="!h-7 !w-7" disabled={!opp.account_id} onClick={act("contacts")} />
+          <IconBtn icon={FiUserPlus} label="Agregar contacto" className="!h-7 !w-7" onClick={act("contact-new")} />
+          <IconBtn icon={FiShoppingCart} label="Requerimiento de compra" className="!h-7 !w-7" onClick={act("purchase")} />
+          {journey?.business_case && <BusinessCaseIcon businessCase={journey.business_case} />}
+          <Link to={`${BASE}/opportunities/${opp.id}/blue-sheet`} aria-label="Abrir Blue Sheet" title="Abrir Blue Sheet" className="inline-flex !h-7 !w-7 shrink-0 items-center justify-center rounded-lg text-fam-muted transition-colors duration-100 hover:bg-fam-subtle hover:text-fam-text">
             <FiFileText className="h-4 w-4" aria-hidden="true" />
           </Link>
         </div>
         <Menu
-          label="Mover"
-          variant="ghost"
-          size="sm"
+          label="Mover de fase"
+          icon={FiMove}
+          iconOnly
+          className="!h-7 !w-7"
           items={stages.map((s) => ({ label: s.name, disabled: s.id === opp.stage_id, onSelect: () => onMove(opp, s) }))}
         />
       </div>
@@ -137,7 +169,7 @@ function LeadCard({ lead, selected, onOpen }) {
   );
 }
 
-function Board({ stages, opps, journeys, leads, loading, selected, onOpenOpp, onOpenLead, onMove, onAction }) {
+function Board({ stages, opps, lost, lostLoading, journeys, leads, loading, selected, onOpenOpp, onOpenLead, onMove, onAction }) {
   const card = (o) => (
     <OpportunityCard key={o.id} opp={o} journey={journeys[o.id]} stages={stages} selected={selected === `opp:${o.id}`} onOpen={onOpenOpp} onMove={onMove} onAction={onAction} />
   );
@@ -148,7 +180,8 @@ function Board({ stages, opps, journeys, leads, loading, selected, onOpenOpp, on
     return map;
   }, [stages, opps]);
   const unstaged = useMemo(() => opps.filter((o) => !stages.some((s) => s.id === o.stage_id)), [opps, stages]);
-  const promoted = useMemo(() => new Set(opps.map((o) => o.lead_id).filter(Boolean)), [opps]);
+  // Un lead con oportunidad (abierta o ya perdida) no vuelve a la columna de leads calificados.
+  const promoted = useMemo(() => new Set([...opps, ...(lost || [])].map((o) => o.lead_id).filter(Boolean)), [opps, lost]);
   const leadsNew = leads.filter((l) => ["new", "contacted"].includes(l.status));
   const leadsQualified = leads.filter((l) => l.status === "qualified" && !promoted.has(l.id));
 
@@ -156,7 +189,7 @@ function Board({ stages, opps, journeys, leads, loading, selected, onOpenOpp, on
     return (
       <div className="flex gap-3 overflow-x-auto pb-2" role="status" aria-label="Cargando tablero">
         {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="w-[288px] shrink-0 space-y-2 rounded-xl border border-fam-border bg-fam-canvas p-2">
+          <div key={i} className="w-[18rem] shrink-0 space-y-2 rounded-xl border border-fam-border bg-fam-canvas p-2">
             <Skeleton className="h-10 w-full" /><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" />
           </div>
         ))}
@@ -205,6 +238,7 @@ function Board({ stages, opps, journeys, leads, loading, selected, onOpenOpp, on
           {unstaged.map(card)}
         </Column>
       )}
+      <LostColumn opps={lost} loading={lostLoading} />
     </div>
   );
 }
@@ -356,7 +390,7 @@ export default function OpportunitiesPage() {
   const { user } = useAuth();
   const { showToast } = useUI();
   const manager = isManager(user);
-  const [url, setUrl] = useUrlState({ view: "board", q: "", owner: "", stale: "", status: "open", sel: "", new: "" });
+  const [url, setUrl] = useUrlState({ view: "board", q: "", owner: "", stale: "", status: "open", sel: "", new: "", plan: "" });
   const view = VIEWS.some((v) => v.value === url.view) ? url.view : "board";
   const [search, setSearch] = useUrlSearch(url.q, (q) => setUrl({ q }));
   const [stages, setStages] = useState([]);
@@ -384,6 +418,8 @@ export default function OpportunitiesPage() {
   const leadsLoad = useLoad(() => fetchLeads({ limit: 200 }), [], { fallback: "No se pudieron cargar los leads." });
   const reloadOpps = oppsLoad.reload;
   const reloadLeads = leadsLoad.reload;
+  // Columna "Cerrado perdido" del tablero: perdidas y no factibles, respetando búsqueda, responsable y plan.
+  const lostLoad = useLoad(() => fetchOpportunities({ status: "lost", limit: 200 }), [], { fallback: "No se pudieron cargar las oportunidades perdidas." });
 
   const allOpps = useMemo(
     () => listOf(oppsLoad.data).map((o) => (moved[o.id] ? { ...o, stage_id: moved[o.id] } : o)),
@@ -398,8 +434,9 @@ export default function OpportunitiesPage() {
     (!term || matches(o.name) || matches(o.account_name) || matches(o.opportunity_code))
     && (!url.owner || String(o.owner_user_id) === url.owner)
     && (!url.stale || isStale(o))
+    && (!url.plan || o.account_plan_id === url.plan)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  )), [allOpps, term, url.owner, url.stale]);
+  )), [allOpps, term, url.owner, url.stale, url.plan]);
   const shownLeads = useMemo(() => leads.filter((l) => (
     (!term || matches(leadName(l)) || matches(l.company_name))
     && (!url.owner || String(l.owner_user_id) === url.owner)
@@ -416,14 +453,26 @@ export default function OpportunitiesPage() {
     return () => { cancelled = true; };
   }, [oppIds, purchaseKey]);
 
+  const lostOpps = useMemo(() => listOf(lostLoad.data).filter((o) => (
+    (!term || matches(o.name) || matches(o.account_name) || matches(o.opportunity_code))
+    && (!url.owner || String(o.owner_user_id) === url.owner)
+    && (!url.plan || o.account_plan_id === url.plan)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  )).sort((a, b) => new Date(b.actual_close_date || b.updated_at) - new Date(a.actual_close_date || a.updated_at)), [lostLoad.data, term, url.owner, url.plan]);
+
   const staleCount = allOpps.filter(isStale).length;
   const stageById = useMemo(() => new Map(stages.map((s) => [s.id, s])), [stages]);
   const [selKind, selId] = url.sel.split(":");
   const selOpp = selKind === "opp" ? allOpps.find((o) => o.id === selId) : null;
   const selLead = selKind === "lead" ? leads.find((l) => l.id === selId) : null;
   const select = (key) => setUrl({ sel: url.sel === key ? "" : key }, { replace: false });
-  const hasFilters = Boolean(url.q || url.owner || url.stale);
-  const clearFilters = () => { setSearch(""); setUrl({ q: "", owner: "", stale: "" }); };
+  const hasFilters = Boolean(url.q || url.owner || url.stale || url.plan);
+  const clearFilters = () => { setSearch(""); setUrl({ q: "", owner: "", stale: "", plan: "" }); };
+
+  // Planes de cuenta activos: franja fija sobre el tablero (un plan dura años y no pasa por fases).
+  const plansLoad = useLoad(() => fetchActiveAccountPlans(), [], { fallback: "No se pudieron cargar los planes de cuenta." });
+  const plans = useMemo(() => (Array.isArray(plansLoad.data) ? plansLoad.data : []).filter((p) => !url.owner || String(p.seller_user_id) === url.owner), [plansLoad.data, url.owner]);
+  const selPlan = url.plan ? plans.find((p) => p.id === url.plan) : null;
 
   // Mover de fase con actualización optimista; si el servidor falla, la tarjeta vuelve a su fase.
   const move = async (opp, stage) => {
@@ -487,11 +536,23 @@ export default function OpportunitiesPage() {
           <Btn icon={FiAlertTriangle} onClick={() => setUrl({ stale: "1" })}>{staleCount} estancada{staleCount === 1 ? "" : "s"}</Btn>
         )}
         {url.stale && <FilterChip label={`Sin movimiento ${STALE_DAYS}+ días`} onRemove={() => setUrl({ stale: "" })} />}
+        {url.plan && <FilterChip label={`Plan: ${selPlan ? `${selPlan.account_name} · ${selPlan.name}` : "seleccionado"}`} onRemove={() => setUrl({ plan: "" })} />}
         {hasFilters && <Btn variant="link" onClick={clearFilters}>Limpiar</Btn>}
       </div>
 
       <ErrorNote message={oppsLoad.error} onRetry={reloadOpps} className="mb-4" />
       {view === "board" && <ErrorNote message={leadsLoad.error} onRetry={reloadLeads} className="mb-4" />}
+      {view === "board" && (
+        <>
+          <PlansStrip
+            plans={plans}
+            loading={plansLoad.loading && !plansLoad.data}
+            selectedId={url.plan}
+            onSelect={(plan) => setUrl({ plan: url.plan === plan.id ? "" : plan.id, sel: "" })}
+          />
+          <OriginLegend />
+        </>
+      )}
 
       <div className={selOpp || selLead ? "grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_400px]" : ""}>
         <div className="min-w-0">
@@ -499,6 +560,8 @@ export default function OpportunitiesPage() {
             <Board
               stages={stages}
               opps={opps}
+              lost={url.stale ? [] : lostOpps}
+              lostLoading={lostLoad.loading && !lostLoad.data}
               journeys={journeys}
               leads={shownLeads}
               loading={(oppsLoad.loading && !oppsLoad.data) || stages.length === 0}

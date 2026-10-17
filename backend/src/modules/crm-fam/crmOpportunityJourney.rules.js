@@ -155,7 +155,13 @@ function pickReference({ privates, publics, businessCases }) {
   const pub = byRecent(publics);
   if (pub) return { type: "public_purchase", id: pub.id, status: pub.status, code: pub.process_code || null, drive_folder_id: pub.drive_folder_id || null };
   const bc = byRecent(businessCases);
-  if (bc) return { type: "business_case", id: bc.id, status: bc.bc_stage || bc.status, code: bc.process_code || null, drive_folder_id: bc.drive_folder_id || null };
+  if (bc) {
+    return {
+      type: "business_case", id: bc.id, status: bc.bc_stage || bc.status, code: bc.process_code || null, drive_folder_id: bc.drive_folder_id || null,
+      // El Business Case es la herramienta de factibilidad de una compra publica o privada.
+      family: /public/i.test(String(bc.bc_purchase_type || "")) ? "public" : "private",
+    };
+  }
   return null;
 }
 
@@ -186,8 +192,15 @@ function buildJourney(sources = {}) {
     [...data.privates, ...data.publics, ...data.businessCases].map((s) => s.updated_at),
     milestones.map((m) => m.at),
   );
+  // Business Case: lo usan las compras publicas y las privadas en comodato. Se informa aunque aun
+  // no exista, para que la tarjeta lo marque como pendiente.
+  const feasibility = milestones.find((m) => m.key === "factibilidad") || null;
+  const recentBc = [...data.businessCases].sort((a, b) => (toTime(b.updated_at) || 0) - (toTime(a.updated_at) || 0))[0] || null;
+  const usesBusinessCase = Boolean(recentBc || feasibility || data.publics.length
+    || data.privates.some((p) => /comodato/i.test(String(p.offer_kind || ""))));
   return {
     reference,
+    business_case: usesBusinessCase ? { id: recentBc?.id || null, state: feasibility?.state || "pending" } : null,
     milestones,
     progress: { done, total: milestones.length },
     blocked: milestones.find((m) => m.state === "blocked") || null,
@@ -196,4 +209,23 @@ function buildJourney(sources = {}) {
   };
 }
 
-module.exports = { buildJourney, latest };
+// Fase del embudo que corresponde al avance real del expediente (clave de STAGE_NAMES en
+// crmPurchaseSync). Sirve para reclasificar oportunidades cuya tarjeta quedo atrasada.
+function stageForJourney(journey) {
+  if (!journey) return null;
+  const state = Object.fromEntries(journey.milestones.map((m) => [m.key, m.state]));
+  const status = journey.reference?.status || null;
+  if (state.entrega === "done" || state.consumibles === "done") return "CONSUMABLES";
+  if (state.contrato === "done" || state.entrega === "current") return "DELIVERY";
+  if (state.oferta === "done" || state.contrato === "current") return "CONTRACTS";
+  if (status === "pending_client_signature") return "ACCEPTANCE";
+  if (status === "price_improvement_requested" || status === "offer_rejected_by_commercial") return "NEGOTIATION";
+  if (state.oferta === "current") {
+    const offer = journey.milestones.find((m) => m.key === "oferta");
+    return /enviada/i.test(offer.detail || "") ? "PROPOSAL_PRESENTATION" : "OFFER_DEVELOPMENT";
+  }
+  if (state.factibilidad === "done" || state.disponibilidad === "done") return "OFFER_DEVELOPMENT";
+  return "NEEDS_ANALYSIS";
+}
+
+module.exports = { buildJourney, stageForJourney, latest };

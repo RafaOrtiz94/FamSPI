@@ -5,6 +5,7 @@
 const db = require("../../config/db");
 const crm = require("./crm.service");
 const { suggestSwot, QUADRANTS, IMPACTS } = require("./crmAccountSwot.rules");
+const { SOLD_STAGES_SQL } = require("./crm.constants");
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
 
@@ -35,17 +36,17 @@ const assertPlanOfAccount = async (accountId, planId) => {
 const collectFacts = async (accountId, planId, user) => {
   // Reutiliza las estadisticas del plan: meta, vendido y faltante ya contemplan "ganada o en Contratos".
   const stats = await crm.getAccountSalesStats(accountId, user, planId);
-  const SOLD = `(o.status = 'won' OR (o.status = 'open' AND st.name = 'Contratos'))`;
+  const SOLD = `(o.status = 'won' OR (o.status = 'open' AND st.name IN ${SOLD_STAGES_SQL}))`;
 
   const [opps, lostReasons, acts, contacts, strengths, competitors, redFlags, account] = await Promise.all([
     db.query(
       `SELECT
-         COUNT(*) FILTER (WHERE o.status = 'open' AND st.name IS DISTINCT FROM 'Contratos')::int AS open,
-         COALESCE(SUM(o.estimated_amount) FILTER (WHERE o.status = 'open' AND st.name IS DISTINCT FROM 'Contratos'), 0)::numeric AS open_amount,
+         COUNT(*) FILTER (WHERE o.status = 'open' AND (st.name IS NULL OR st.name NOT IN ${SOLD_STAGES_SQL}))::int AS open,
+         COALESCE(SUM(o.estimated_amount) FILTER (WHERE o.status = 'open' AND (st.name IS NULL OR st.name NOT IN ${SOLD_STAGES_SQL})), 0)::numeric AS open_amount,
          COUNT(*) FILTER (WHERE ${SOLD})::int AS won,
          COALESCE(SUM(COALESCE(o.won_amount, o.estimated_amount, 0)) FILTER (WHERE ${SOLD}), 0)::numeric AS won_amount,
-         COUNT(*) FILTER (WHERE o.status = 'open' AND st.name = 'Contratos')::int AS contracts,
-         COALESCE(SUM(o.estimated_amount) FILTER (WHERE o.status = 'open' AND st.name = 'Contratos'), 0)::numeric AS contracts_amount,
+         COUNT(*) FILTER (WHERE o.status = 'open' AND st.name IN ${SOLD_STAGES_SQL})::int AS contracts,
+         COALESCE(SUM(o.estimated_amount) FILTER (WHERE o.status = 'open' AND st.name IN ${SOLD_STAGES_SQL}), 0)::numeric AS contracts_amount,
          COUNT(*) FILTER (WHERE o.status = 'lost')::int AS lost,
          COUNT(*) FILTER (WHERE o.status = 'open' AND o.estimated_close_date < CURRENT_DATE)::int AS overdue_close
        FROM crm.crm_opportunities o

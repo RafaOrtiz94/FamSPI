@@ -6,6 +6,7 @@ const sheetReader = require("./businessCaseSheetSyncLocal.service");
 const predictiveLabService = require("./businessCasePredictiveLab.service");
 const { executePackage } = require("./matrixCalculationEngine.service");
 const cobasQuantities = require("./calculationPackages/immunoChemistryCobasQuantities.package");
+const consumableRulesService = require("./consumableRules.service");
 
 const MATRIX_VERSION = "2024-12-06.1";
 
@@ -313,8 +314,9 @@ function getOfferColumnRules(contractObject) {
 async function loadPricingContext(businessCaseId) {
   const { rows: contextRows } = await db.query(
     `SELECT vc.business_case_id AS id, vc.client_name, vc.contract_object,
-            vc.modern_bc_metadata
+            vc.modern_bc_metadata, e.bc_purchase_type
        FROM v_business_cases_complete vc
+       LEFT JOIN equipment_purchase_requests e ON e.id = vc.business_case_id
       WHERE vc.business_case_id = $1
       LIMIT 1`,
     [businessCaseId],
@@ -344,7 +346,7 @@ async function loadPricingContext(businessCaseId) {
       [businessCaseId],
     ),
     db.query(
-      `SELECT item_key, item_id, name, item_type, annual_qty, reference_qty,
+      `SELECT item_key, item_id, catalog_id, name, item_type, annual_qty, reference_qty,
               planned_qty, equipment_id, equipment_name
          FROM bc_consumption_items
         WHERE business_case_id = $1
@@ -641,7 +643,7 @@ function buildQuantityEquipmentResult({ equipment, modality, quantityPackage, it
   }
 }
 
-async function buildPreview(businessCaseId, { refreshFromSheet = false } = {}) {
+async function buildPreview(businessCaseId, { refreshFromSheet = false, conventions = null } = {}) {
   const data = await loadPricingContext(businessCaseId);
   let sheetSync = { requested: refreshFromSheet, ok: null, readOnly: true };
   if (refreshFromSheet) {
@@ -659,7 +661,9 @@ async function buildPreview(businessCaseId, { refreshFromSheet = false } = {}) {
       };
     }
   }
-  const modality = resolveModality(data.context.contract_object);
+  const contractObjectType = businessCaseOfferService.__testables?.resolveOfferContractObjectType?.(data.context)
+    || data.context.contract_object;
+  const modality = resolveModality(contractObjectType);
   const globalBlockers = [];
   if (sheetSync.requested && sheetSync.ok === false) {
     globalBlockers.push({
@@ -670,7 +674,7 @@ async function buildPreview(businessCaseId, { refreshFromSheet = false } = {}) {
   if (!modality) {
     globalBlockers.push({
       code: "MODALITY_NOT_RESOLVED",
-      message: "El objeto de contratacion no identifica determinacion, determinacion efectiva o todo comprado.",
+      message: "El tipo para montaje de oferta no identifica determinacion, determinacion efectiva o todo comprado.",
     });
   }
   if (!data.equipment.length) {
@@ -790,6 +794,15 @@ async function buildPreview(businessCaseId, { refreshFromSheet = false } = {}) {
   equipmentResults.forEach((entry) => {
     entry.predictiveModel = predictiveByEquipment.get(Number(entry.equipmentId)) || null;
   });
+  const rulesByEquipment = await consumableRulesService.buildRulesPreview({
+    businessCaseId,
+    data,
+    deterministicEquipmentResults: equipmentResults,
+    conventions,
+  });
+  equipmentResults.forEach((entry) => {
+    entry.ruleEngine = rulesByEquipment.get(Number(entry.equipmentId)) || null;
+  });
 
   const calculatedCount = equipmentResults.filter((entry) => entry.status === "calculated").length;
   const blockerCount = globalBlockers.length + equipmentResults.reduce(
@@ -807,7 +820,7 @@ async function buildPreview(businessCaseId, { refreshFromSheet = false } = {}) {
     offerWriteEnabled: false,
     modality,
     sheetSync,
-    offerColumnRules: getOfferColumnRules(data.context.contract_object),
+    offerColumnRules: getOfferColumnRules(contractObjectType),
     globalBlockers,
     summary: {
       equipmentCount: data.equipment.length,

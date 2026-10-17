@@ -36,7 +36,12 @@ export const journeyReference = (reference) => {
   if (reference.type === "public_purchase") {
     return { kind: "Compra pública", status: statusLabel(reference.status), to: "/dashboard/purchases/workspace?tab=public" };
   }
-  return { kind: "Business Case", status: statusLabel(reference.status), to: `/dashboard/business-case/workspace/${reference.id}` };
+  // Business Case: herramienta de factibilidad de la compra (pública o privada) a la que pertenece.
+  return {
+    kind: `${reference.family === "public" ? "Compra pública" : "Compra privada"} · Business Case`,
+    status: statusLabel(reference.status),
+    to: `/dashboard/business-case/workspace/${reference.id}`,
+  };
 };
 
 // El hito que hay que mirar ahora: el detenido, si no el que está en curso, si no el primero pendiente.

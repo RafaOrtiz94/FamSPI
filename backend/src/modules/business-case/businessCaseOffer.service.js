@@ -808,7 +808,11 @@ function derivePrivateOfferPermissions(context, user, latestOffer) {
   };
 }
 
-async function loadConsumptionItemsForOffer(businessCaseId) {
+// forceTemplateReload: releer del disco la tabla base (plantilla de Sheets) antes de sincronizar.
+// Solo al generar o regenerar una oferta: reprocesar la plantilla bloquea el backend varios
+// segundos, y la vista del workspace (ui-guidance la pide en cada apertura del BC) usa la copia
+// en memoria.
+async function loadConsumptionItemsForOffer(businessCaseId, { forceTemplateReload = false } = {}) {
   // Antes de leer, sincroniza contra la hoja del BC para crear en
   // bc_consumption_items cualquier item de catalogo que falte -- incluidos
   // los que no tienen valor en DET/AÑO/PROCESO -- porque de lo contrario la
@@ -819,7 +823,7 @@ async function loadConsumptionItemsForOffer(businessCaseId) {
   // hoja no generada aun) -- se sigue con lo que ya haya en la tabla.
   try {
     const { syncConsumptionQuantitiesFromSheet } = require("./businessCase.service");
-    await syncConsumptionQuantitiesFromSheet(businessCaseId, { forceTemplateReload: true });
+    await syncConsumptionQuantitiesFromSheet(businessCaseId, { forceTemplateReload });
   } catch (error) {
     logger.warn(
       { businessCaseId, error: error?.message || String(error) },
@@ -1085,7 +1089,7 @@ async function buildOfferTemplatePayload(context, items, user) {
     delete grouped.control;
   }
 
-  const determinationOnly = isDeterminationOnlyContractObject(context?.contract_object);
+  const determinationOnly = isDeterminationOnlyContractObject(resolveOfferContractObjectType(context));
   if (determinationOnly) {
     Object.keys(grouped).forEach((key) => {
       if (key !== "reactivo") grouped[key] = [];
@@ -1702,6 +1706,22 @@ function isTodoCompradoContractObject(contractObject) {
   return normalizeOfferText(contractObject).includes("todo comprado");
 }
 
+// El objeto es descriptivo y libre. El selector separado gobierna el montaje
+// de oferta; los casos historicos conservan su comportamiento porque, si el
+// tipo no existe aun, se usa el texto legado del objeto.
+function resolveOfferContractObjectType(context = {}) {
+  const metadata = context?.modern_bc_metadata && typeof context.modern_bc_metadata === "object"
+    ? context.modern_bc_metadata
+    : {};
+  return String(
+    context?.contract_object_type
+    || metadata?.general_data?.contract_object_type
+    || metadata?.contract_object_type
+    || context?.contract_object
+    || "",
+  ).trim();
+}
+
 function getOfferPriceColumnVisibility(sectionKey, contractObject) {
   if (sectionKey === "reactivo") {
     if (isDeterminationContractObject(contractObject)) {
@@ -1963,11 +1983,12 @@ async function buildFormalOfferPdfBuffer({ context, offer, templatePayload, pric
       electrolito: "Electrolitos",
     };
 
-    const determinationOnly = isDeterminationOnlyContractObject(context?.contract_object);
+    const offerContractObjectType = resolveOfferContractObjectType(context);
+    const determinationOnly = isDeterminationOnlyContractObject(offerContractObjectType);
     getOfferSectionKeys(normalizedPayload.sections).forEach((key) => {
       if (determinationOnly && key !== "reactivo") return;
       drawOfferSectionTable(doc, labels[key], normalizedPayload.sections?.[key] || [], {
-        ...getOfferPriceColumnVisibility(key, context?.contract_object),
+        ...getOfferPriceColumnVisibility(key, offerContractObjectType),
         ...(determinationOnly ? { determinationLabel: "US$ DET" } : {}),
       });
     });
@@ -2751,11 +2772,11 @@ async function ensureOfferDriveFolder(context) {
   return ensureBusinessCaseDriveFolderById(context.id);
 }
 
-async function loadOfferItemsForContext(context) {
+async function loadOfferItemsForContext(context, options = {}) {
   if (context?.source_type === "private_purchase") {
     return normalizePrivatePurchaseEquipmentItems(context.equipment);
   }
-  return loadConsumptionItemsForOffer(context.id);
+  return loadConsumptionItemsForOffer(context.id, options);
 }
 
 function buildDefaultOfferTarget(items = []) {
@@ -2950,7 +2971,7 @@ async function createOfferDraft(businessCaseId, user) {
   await ensureOfferTable();
   const context = await getBusinessCaseOfferContext(businessCaseId);
   assertOfferManager(context, user);
-  const items = await loadOfferItemsForContext(context);
+  const items = await loadOfferItemsForContext(context, { forceTemplateReload: true });
   const targets = buildOfferTargetsForContext(context, items);
   if (targets.length <= 1) {
     return createOfferDraftForContext(context, user, targets[0] || buildDefaultOfferTarget(items));
@@ -2984,7 +3005,7 @@ async function createPrivatePurchaseOfferDraft(privatePurchaseId, user) {
 
 async function createOfferDraftForContext(context, user, target = null) {
   const owner = resolveOfferOwner(context);
-  const allItems = target?.items ? target.items : await loadOfferItemsForContext(context);
+  const allItems = target?.items ? target.items : await loadOfferItemsForContext(context, { forceTemplateReload: true });
   const offerTarget = target || buildDefaultOfferTarget(allItems);
   const latest = await getLatestOfferVersion(context, offerTarget.offerKey);
   if (latest && !OFFER_CREATOR_ALLOWED_STATUSES.has(String(latest.status || "").trim().toLowerCase())) {
@@ -3557,7 +3578,7 @@ async function regenerateOfferVersionForContext(context, offerId, user) {
   const existingLeadTime = await readOfferPlazoFromSheet(offer.sheet_file_id);
 
   const offerTarget = getOfferTargetFromRow(offer);
-  const allItems = await loadOfferItemsForContext(context);
+  const allItems = await loadOfferItemsForContext(context, { forceTemplateReload: true });
   const currentTargets = buildOfferTargetsForContext(context, allItems);
   const currentTarget = currentTargets.find((target) => target.offerKey === offerTarget.offerKey);
   const targetItems = currentTarget?.items?.length
@@ -3792,6 +3813,7 @@ module.exports = {
     getOfferPriceColumnVisibility,
     isDeterminationContractObject,
     isTodoCompradoContractObject,
+    resolveOfferContractObjectType,
     resolveOfferClientLocation,
     normalizePdfText,
     mergeOfferPdfBuffers,

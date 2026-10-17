@@ -321,15 +321,15 @@ export default function BlueSheetPage() {
         {/* Contenido del paso */}
         <div className="min-w-0">
           <div key={step.id} className="rounded-xl border border-fam-border bg-fam-surface p-4 sm:p-6">
-            {step.id === "objetivo" && <StepObjective bs={bs} editable={editable} onSaved={onChanged} />}
-            {step.id === "proceso" && <StepBuyingProcess bs={bs} editable={editable} onSaved={onChanged} />}
+            {step.id === "objetivo" && <StepObjective bs={bs} editable={editable} redFlags={redFlags} onSaved={onChanged} />}
+            {step.id === "proceso" && <StepBuyingProcess bs={bs} editable={editable} redFlags={redFlags} onSaved={onChanged} />}
             {step.id === "compradores" && <StepBuyers bs={bs} editable={editable} redFlags={redFlags} onChanged={onChanged} />}
             {step.id === "resultados" && <StepResults bs={bs} editable={editable} onChanged={onChanged} />}
             {step.id === "competencia" && <StepCompetitors bs={bs} editable={editable} redFlags={redFlags} onChanged={onChanged} />}
             {step.id === "fortalezas" && <StepStrengths bs={bs} editable={editable} onChanged={onChanged} />}
             {step.id === "redflags" && <StepRedFlags bs={bs} editable={editable} canAccept={manager} onChanged={onChanged} />}
             {step.id === "scorecard" && <StepScorecard bs={bs} editable={editable} redFlags={redFlags} onSaved={onChanged} />}
-            {step.id === "estrategia" && <StepStrategy bs={bs} editable={editable} onSaved={onChanged} />}
+            {step.id === "estrategia" && <StepStrategy bs={bs} editable={editable} redFlags={redFlags} onSaved={onChanged} />}
             {step.id === "acciones" && <StepActions bs={bs} editable={editable} redFlags={redFlags} onChanged={onChanged} />}
             {step.id === "revision" && <StepReview bs={bs} editable={editable} requirements={requirements} counts={counts} onGoTo={goTo} />}
           </div>

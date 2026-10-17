@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { FiArrowRight, FiCalendar, FiFileText, FiPlus, FiTarget, FiUser } from "react-icons/fi";
 import {
-  fetchActivities, fetchCrmDashboard, fetchCrmPipeline, fetchLeads, fetchOpportunities,
+  fetchActivities, fetchCrmDashboard, fetchCrmPipeline, fetchLeads, fetchNextActions, fetchOpportunities, fetchSalesGoals,
 } from "../../../core/api/crmFamApi";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { useUI } from "../../../core/ui/UIContext";
@@ -18,6 +18,8 @@ const BASE = "/dashboard/crm-fam";
 const MANAGER_ROLES = ["jefe_comercial", "gerencia", "gerencia_general", "gerente_general", "director", "gerente", "jefe_ti", "jefe_de_ti", "admin", "administrador"];
 const CLOSING_WINDOW_DAYS = 14;
 const ACTIVITY_LIMIT = 200;
+// Señales de "qué atender primero" que se muestran como problema (algo detenido o vencido).
+const URGENT_CODES = ["blocked", "offer_unsigned", "contract_pending", "close_overdue"];
 
 const listOf = (res) => (Array.isArray(res) ? res : res?.data || []);
 
@@ -62,6 +64,28 @@ export default function CrmDashboardPage() {
   const [state, setState] = useState({ loading: true, error: "", activities: [], leads: [], opps: [], summary: null, pipeline: [] });
 
   const requestRef = useRef(0);
+
+  // Meta del mes del usuario (la define jefatura en Reportes → Metas).
+  const [goal, setGoal] = useState(null);
+  useEffect(() => {
+    if (!user?.id) return undefined;
+    let cancelled = false;
+    fetchSalesGoals()
+      .then((res) => { if (!cancelled) setGoal((res?.sellers || []).find((s) => Number(s.user_id) === Number(user.id)) || null); })
+      .catch(() => { if (!cancelled) setGoal(null); });
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  // Siguiente mejor acción: lo calcula el servidor con el avance real de cada expediente.
+  const [next, setNext] = useState({ items: [] });
+  useEffect(() => {
+    if (!user?.id) return undefined;
+    let cancelled = false;
+    fetchNextActions({ scope, limit: 8 })
+      .then((res) => { if (!cancelled) setNext(res && Array.isArray(res.items) ? res : { items: [] }); })
+      .catch(() => { if (!cancelled) setNext({ items: [] }); });
+    return () => { cancelled = true; };
+  }, [user?.id, scope]);
 
   const load = useCallback(async () => {
     if (!user?.id) return;
@@ -152,8 +176,44 @@ export default function CrmDashboardPage() {
           { label: "Requiere tu acción", value: state.loading ? "—" : `${number(totalPending)}${state.activities.length >= ACTIVITY_LIMIT ? "+" : ""}`, hint: "actividades, leads, cierres y Blue Sheets", tone: work.overdue.length ? "danger" : undefined },
           { label: "Pipeline abierto", value: state.summary ? money(openStats.total_amount) : "—", hint: `${number(openStats.count)} oportunidad(es) abierta(s)`, to: `${BASE}/opportunities` },
           { label: "Acciones del Blue Sheet", value: state.summary ? number(state.summary.my_open_actions) : "—", hint: "asignadas a ti, sin cerrar" },
+          ...(goal && goal.target_amount !== null ? [{
+            label: "Tu meta del mes",
+            value: `${goal.progress_pct ?? 0}%`,
+            hint: `${money(goal.sold_amount)} de ${money(goal.target_amount)}${goal.required_pipeline_amount ? ` · genera ${money(goal.required_pipeline_amount)} en pipeline` : ""}`,
+          }] : []),
         ]}
       />
+
+      {next.items.length > 0 && (
+        <Panel
+          title="Qué atender primero"
+          hint={`Las ${next.items.length} oportunidades más urgentes ${scope === "team" ? "del equipo" : "de tu cartera"}, por lo que está detenido o por vencer`}
+          flush
+          className="mb-6"
+        >
+          <ol className="mb-0 list-none divide-y divide-fam-border pl-0">
+            {next.items.map((item, index) => (
+              <li key={item.opportunity_id}>
+                <Link to={`${BASE}/opportunities/${item.opportunity_id}`} className="group flex items-start gap-3 px-4 py-3 transition-colors duration-100 hover:bg-fam-subtle sm:px-5">
+                  <span className="fam-numeric mt-0.5 w-5 shrink-0 text-right text-[13px] text-fam-muted">{index + 1}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium text-fam-text">{item.name}</span>
+                    <span className={cx("block text-[13px]", URGENT_CODES.includes(item.code) ? "text-fam-danger" : "text-fam-text")}>{item.reason}</span>
+                    <span className="block text-[13px] text-fam-muted">
+                      {item.action}{item.more.length > 0 ? ` · Además: ${item.more.join("; ").toLowerCase()}` : ""}
+                    </span>
+                    <span className="block truncate text-xs text-fam-muted">
+                      {[item.account_name || "Sin cuenta", item.stage_name, scope === "team" ? item.owner_name : null].filter(Boolean).join(" · ")}
+                    </span>
+                  </span>
+                  {item.estimated_amount != null && <span className="fam-numeric hidden shrink-0 text-sm text-fam-text sm:block">{money(item.estimated_amount)}</span>}
+                  <FiArrowRight className="mt-1 h-4 w-4 shrink-0 text-fam-muted opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden="true" />
+                </Link>
+              </li>
+            ))}
+          </ol>
+        </Panel>
+      )}
 
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Panel title="Requiere tu acción" flush>

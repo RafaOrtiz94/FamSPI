@@ -165,6 +165,17 @@ const STATE_OWNERSHIP_TRANSITIONS = {
 };
 
 class BusinessCaseDataOwnership {
+  static async recordSectionAuditEvent(businessCaseId, section, action, user, canonicalState, metadata = {}) {
+    const now = new Date();
+    const actorUserId = resolveActorUuid(user?.uuid || user?.sub || user?.id || user?.user_id);
+    await db.query(
+      `INSERT INTO business_case_section_ownership_audit
+        (business_case_id, section_name, action, performed_by, performed_by_role, canonical_state, metadata, performed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [businessCaseId, section, action, actorUserId, user?.role || null, canonicalState || null, JSON.stringify(metadata || {}), now],
+    );
+  }
+
   /**
    * Get lock status for all sections
    */

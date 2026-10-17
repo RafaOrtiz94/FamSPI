@@ -81,9 +81,9 @@ const SectionNavigator = ({
  // el sidebar aunque el backend/permiso ya las dejara editar.
  {
  id: "investment_values",
- title: "Precios — Inversiones Operativas",
- label: "Precios financieros y operativos",
- description: "Cotizacion, precio operativo, precio financiero y depreciacion en una sola vista",
+ title: "Precios de inversiones",
+ label: "Precios de inversiones",
+ description: "Cotizacion, precio unitario de la inversion y depreciacion en una sola vista",
  icon: FiCreditCard
  },
  {

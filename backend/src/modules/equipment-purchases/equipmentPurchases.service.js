@@ -4917,7 +4917,8 @@ async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_
   try {
     const stageNames =
       normalizedOutcome === "won"
-        ? crmPurchaseSyncService.STAGE_NAMES.NEGOTIATION
+        // Adjudicado en el portal: el cliente acepto; sigue la formalizacion del contrato.
+        ? crmPurchaseSyncService.STAGE_NAMES.ACCEPTANCE
         : normalizedOutcome === "cancelled"
           ? crmPurchaseSyncService.STAGE_NAMES.ARCHIVED
           : crmPurchaseSyncService.STAGE_NAMES.CLOSED_LOST;
@@ -5256,7 +5257,8 @@ async function completeDelivery({ id, user, notes, expected_updated_at }) {
     priority: 2,
   });
   try {
-    await crmPurchaseSyncService.syncPublicPurchaseStage(id, crmPurchaseSyncService.STAGE_NAMES.CLOSED_WON, user, "won");
+    // Equipo entregado: sigue abierta en "Control de consumibles" hasta que exista su expediente.
+    await crmPurchaseSyncService.syncPublicPurchaseStage(id, crmPurchaseSyncService.STAGE_NAMES.CONSUMABLES, user);
   } catch (crmSyncError) {
     logger.warn({ crmSyncError, requestId: id }, "No se pudo sincronizar cierre ganado de compra publica con CRM");
   }
