@@ -1,0 +1,9 @@
+[
+  {"name":"name","link":true,"width":30},
+  {"name":"account","width":18},
+  {"name":"stage","width":13},
+  {"name":"amount","width":10},
+  {"name":"cTotalScore","width":8},
+  {"name":"closeDate","width":10},
+  {"name":"assignedUser","width":11}
+]

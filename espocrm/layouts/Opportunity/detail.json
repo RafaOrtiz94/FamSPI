@@ -1,0 +1,15 @@
+[
+  {
+    "rows": [
+      [{"name":"name"}, {"name":"stage"}],
+      [{"name":"account"}, {"name":"closeDate"}],
+      [{"name":"amount"}, {"name":"probability"}],
+      [{"name":"cFamspiOpportunityId"}, {"name":"cTotalScore"}],
+      [{"name":"cSingularObjective"}, {"name":"cCompetitivePosition"}],
+      [{"name":"cBcStatus"}, {"name":"cPurchaseType"}],
+      [{"name":"cFlagCountOpen"}, {"name":"cFlagCountCritical"}],
+      [{"name":"assignedUser"}, {"name":"teams"}],
+      [{"name":"description"}, false]
+    ]
+  }
+]

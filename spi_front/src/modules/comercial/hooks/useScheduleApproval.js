@@ -51,11 +51,6 @@ export const useScheduleApproval = () => {
   const approve = useCallback(
     async (id, notes) => {
       const safeNotes = String(notes || "").trim();
-      if (!safeNotes) {
-        const error = new Error("Debes ingresar notes para aprobar");
-        setError(error.message);
-        throw error;
-      }
       setLoading(true);
       setError(null);
       try {

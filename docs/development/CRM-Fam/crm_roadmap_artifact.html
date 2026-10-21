@@ -1,0 +1,405 @@
+<title>CRM-Fam: Ruta a la cima</title>
+<style>
+  :root{
+    --ink:#12141A; --paper:#F3F4F7; --card:#FFFFFF; --line:#E1E3E9;
+    --muted:#5B6172; --muted-2:#868C9C;
+    --senior:#3457D5; --senior-soft:#EAEEFC;
+    --pro:#0E8F72; --pro-soft:#E4F5F0;
+    --ultra:#7C3AED; --ultra-soft:#F1E9FE;
+    --good:#0E8F72; --warn:#B8860B; --crit:#C4392B;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ink:#EDEEF2; --paper:#0E1015; --card:#171921; --line:#2A2D38;
+      --muted:#A9AEBD; --muted-2:#7D8299;
+      --senior:#7B93F5; --senior-soft:#1B2440;
+      --pro:#4FCBAA; --pro-soft:#0F2A24;
+      --ultra:#B794FA; --ultra-soft:#241A3D;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#EDEEF2; --paper:#0E1015; --card:#171921; --line:#2A2D38;
+    --muted:#A9AEBD; --muted-2:#7D8299;
+    --senior:#7B93F5; --senior-soft:#1B2440;
+    --pro:#4FCBAA; --pro-soft:#0F2A24;
+    --ultra:#B794FA; --ultra-soft:#241A3D;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    font-size:15px; line-height:1.55;
+    padding-inline:20px; padding-block:0;
+  }
+  h1,h2,h3{font-family:"Fraunces", Georgia, serif; letter-spacing:-0.01em; text-wrap:balance;}
+  .num{font-variant-numeric:tabular-nums;}
+  .tag{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:11.5px;}
+  a{color:inherit;}
+
+  /* ---- top nav ---- */
+  nav.top{
+    position:sticky; top:env(safe-area-inset-top,0px); z-index:20;
+    margin-inline:-20px; padding:10px 20px;
+    background:color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  }
+  nav.top .brand{font-family:"Fraunces",serif; font-weight:600; font-size:14.5px; white-space:nowrap;}
+  nav.top .links{display:flex; gap:4px; flex-wrap:wrap; margin-left:auto;}
+  nav.top .links a{
+    font-size:12.5px; padding:6px 10px; border-radius:100px;
+    border:1px solid var(--line); color:var(--muted); text-decoration:none;
+    white-space:nowrap;
+  }
+  nav.top .links a:hover{color:var(--ink); border-color:var(--muted-2);}
+
+  /* ---- hero ---- */
+  header.hero{max-width:760px; margin:0 auto; padding-block:44px 28px;}
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-size:11.5px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); margin-bottom:14px;
+  }
+  .eyebrow::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--senior);}
+  header.hero h1{font-size:clamp(28px,5.5vw,42px); line-height:1.08; margin:0 0 14px;}
+  header.hero h1 em{font-style:normal; color:var(--senior);}
+  header.hero p.lead{color:var(--muted); font-size:16px; max-width:62ch; margin:0;}
+
+  .benchmark{
+    max-width:760px; margin:0 auto 40px; display:grid; grid-template-columns:1fr 1fr;
+    gap:1px; background:var(--line); border:1px solid var(--line); border-radius:16px; overflow:hidden;
+  }
+  .benchmark .cell{background:var(--card); padding:16px 18px;}
+  .benchmark .cell h3{margin:0 0 4px; font-size:14px;}
+  .benchmark .cell p{margin:0; color:var(--muted); font-size:13px;}
+  .benchmark .cell.wide{grid-column:1 / -1; background:var(--senior-soft);}
+  .benchmark .cell.wide p{color:var(--ink); font-size:13.5px;}
+  @media (max-width:520px){ .benchmark{grid-template-columns:1fr;} }
+
+  /* ---- ladder overview ---- */
+  .ladder{max-width:960px; margin:0 auto 56px; display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+  .ladder .rung{
+    border:1px solid var(--line); border-radius:16px; padding:18px; background:var(--card);
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .ladder .rung .dot{width:10px;height:10px;border-radius:50%;}
+  .ladder .rung h4{margin:0; font-family:"Fraunces",serif; font-size:17px;}
+  .ladder .rung .meta{font-size:12px; color:var(--muted-2);}
+  .ladder .rung p{margin:0; font-size:13px; color:var(--muted);}
+  @media (max-width:680px){ .ladder{grid-template-columns:1fr;} }
+
+  /* ---- tier sections ---- */
+  section.tier{max-width:960px; margin:0 auto; padding-block:52px; border-top:1px solid var(--line); scroll-margin-top:64px;}
+  section.tier .tier-head{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:6px;}
+  section.tier .badge{
+    font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.06em;
+    padding:4px 10px; border-radius:100px; color:#fff; white-space:nowrap;
+  }
+  section.tier h2{font-size:clamp(24px,4vw,32px); margin:0;}
+  section.tier .tagline{color:var(--muted); font-size:14.5px; max-width:68ch; margin:10px 0 8px;}
+  section.tier .stats{display:flex; gap:22px; flex-wrap:wrap; margin:14px 0 30px; font-size:12.5px;}
+  section.tier .stats div{color:var(--muted-2);}
+  section.tier .stats b{display:block; color:var(--ink); font-size:15px; font-family:"Fraunces",serif;}
+
+  .area-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-bottom:26px;}
+  @media (max-width:680px){ .area-grid{grid-template-columns:1fr;} }
+  .area{border:1px solid var(--line); border-radius:14px; padding:16px 18px; background:var(--card);}
+  .area h3{font-size:14.5px; margin:0 0 10px; display:flex; align-items:center; gap:8px;}
+  .area h3 .n{
+    font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted-2);
+    border:1px solid var(--line); border-radius:6px; padding:1px 6px;
+  }
+  .area ul{margin:0; padding-left:18px; display:flex; flex-direction:column; gap:7px;}
+  .area li{font-size:13.3px; color:var(--ink);}
+  .area li .ref{color:var(--muted-2); font-size:11.5px;}
+
+  .kpi-row{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;}
+  .kpi{
+    border:1px dashed var(--line); border-radius:12px; padding:10px 14px; font-size:12.5px; color:var(--muted);
+    background:color-mix(in srgb, var(--card) 60%, var(--paper));
+  }
+  .kpi b{color:var(--ink); font-family:"IBM Plex Mono",monospace; font-weight:600;}
+
+  .risk{
+    border-left:3px solid var(--warn); background:color-mix(in srgb, var(--warn) 8%, var(--card));
+    border-radius:0 10px 10px 0; padding:10px 14px; font-size:12.8px; color:var(--muted); margin-top:6px;
+  }
+  .risk b{color:var(--ink);}
+
+  /* per-tier accent wiring */
+  #senior .badge{background:var(--senior);}
+  #senior .area h3 .n{color:var(--senior); border-color:var(--senior);}
+  #pro .badge{background:var(--pro);}
+  #pro .area h3 .n{color:var(--pro); border-color:var(--pro);}
+  #ultra .badge{background:var(--ultra);}
+  #ultra .area h3 .n{color:var(--ultra); border-color:var(--ultra);}
+  #ultra{background:linear-gradient(180deg, transparent, var(--ultra-soft) 40%, transparent);}
+
+  .ai-note{
+    display:flex; gap:10px; align-items:flex-start; border:1px solid var(--ultra);
+    background:var(--ultra-soft); border-radius:12px; padding:12px 14px; font-size:12.6px; color:var(--muted); margin-top:20px;
+  }
+  .ai-note b{color:var(--ink);}
+
+  footer.close{max-width:760px; margin:0 auto; padding:52px 0 60px; border-top:1px solid var(--line);}
+  footer.close h2{font-size:22px; margin:0 0 10px;}
+  footer.close p{color:var(--muted); font-size:14px; max-width:64ch;}
+  footer.close .steps{display:flex; flex-direction:column; gap:10px; margin-top:18px;}
+  footer.close .steps div{display:flex; gap:12px; align-items:baseline; font-size:13.5px;}
+  footer.close .steps .idx{font-family:"IBM Plex Mono",monospace; color:var(--muted-2); width:18px; flex-shrink:0;}
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<nav class="top">
+  <span class="brand">CRM-Fam · Ruta a la cima</span>
+  <div class="links">
+    <a href="#senior">Senior</a>
+    <a href="#pro">Senior Pro</a>
+    <a href="#ultra">Senior Ultra</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <span class="eyebrow">Roadmap · comercial / CRM-Fam</span>
+  <h1>Que un vendedor de FamSPI nunca tenga que <em>envidiar</em> un REXIS o un Salesforce.</h1>
+  <p class="lead">
+    Tres planes acumulativos para el módulo CRM-Fam (<span class="tag">backend/src/modules/crm-fam</span>).
+    Cada uno se construye sobre el anterior — no son alternativas, son escalones. El objetivo no es
+    clonar Salesforce: es usar la ventaja que un CRM externo nunca tendrá — estar cosido al resto de FamSPI
+    (Business Case, Compras, Firma digital, Activos TI, Asistencia) — para llegar más lejos con menos.
+  </p>
+</header>
+
+<div class="benchmark">
+  <div class="cell">
+    <h3>Lo que ya tenemos</h3>
+    <p>Blue Sheet (Miller Heiman) versionado, scorecard, health score, pipeline de 6 fases, puente automático a Business Case/Compras, firma digital genérica ya construida para otros módulos, Drive/Gmail ya integrados en el resto del sistema.</p>
+  </div>
+  <div class="cell">
+    <h3>Lo que REXIS/Salesforce venden caro</h3>
+    <p>Lo que en un CRM externo es un módulo pago aparte (firma, WhatsApp, BI, IA) para nosotros es reutilizar infraestructura que ya existe en otro módulo de FamSPI.</p>
+  </div>
+  <div class="cell wide">
+    <h3>La apuesta central</h3>
+    <p>Ningún CRM comprado va a saber, sin años de integración custom, que la Cuenta X tiene un Business Case en "Negociación", una compra privada por entregar y un activo TI reservado a su nombre. Nosotros ya tenemos esos datos en la misma base. Ganamos por integración real, no por lista de features.</p>
+  </div>
+</div>
+
+<div class="ladder">
+  <div class="rung">
+    <span class="dot" style="background:var(--senior)"></span>
+    <h4>Senior</h4>
+    <span class="meta">6–8 semanas · fundación</span>
+    <p>Que lo que ya existe funcione impecable: cuenta 360, pipeline visual, datos limpios, reportes con gráficos reales.</p>
+  </div>
+  <div class="rung">
+    <span class="dot" style="background:var(--pro)"></span>
+    <h4>Senior Pro</h4>
+    <span class="meta">2–3 meses · paridad competitiva</span>
+    <p>Automatización, firma digital de ofertas desde el CRM, WhatsApp como canal de actividad, cuotas y aprobaciones.</p>
+  </div>
+  <div class="rung">
+    <span class="dot" style="background:var(--ultra)"></span>
+    <h4>Senior Ultra</h4>
+    <span class="meta">6+ meses · apuesta diferenciadora</span>
+    <p>Copiloto de IA, scoring predictivo real, Customer 360 que une CRM con ventas ya facturadas — algo que no se compra.</p>
+  </div>
+</div>
+
+<!-- ============================= SENIOR ============================= -->
+<section class="tier" id="senior">
+  <div class="tier-head">
+    <span class="badge">PLAN 1</span>
+    <h2>Senior — la fundación</h2>
+  </div>
+  <p class="tagline">
+    No se trata de construir cosas nuevas todavía: el módulo tiene lógica completa (2475 líneas de servicio,
+    24 tablas) pero varias partes se sienten a medio pulir en el uso diario. Este plan cierra esas brechas y deja
+    el terreno listo para automatizar en el Plan 2.
+  </p>
+  <div class="stats">
+    <div><b class="num">6–8</b>semanas</div>
+    <div><b class="num">0</b>tablas nuevas grandes</div>
+    <div><b>reuso</b>infra existente</div>
+  </div>
+
+  <div class="area-grid">
+    <div class="area">
+      <h3><span class="n">01</span>Cuenta 360</h3>
+      <ul>
+        <li>Extender el timeline de cuenta (<span class="ref">getAccountTimeline</span>) para incluir eventos reales de Business Case/Compras vinculados vía <span class="ref">crmPurchaseSync</span> — hoy solo muestra leads/oportunidades/actividades/notas/documentos del propio CRM.</li>
+        <li>Resumen de influencia de compradores a nivel de cuenta (hoy <span class="ref">crm_buying_influences</span> vive solo por oportunidad).</li>
+        <li>Mostrar la clasificación (oro/plata/bronce/normal) y las estadísticas de venta ya construidas también en la lista de cuentas y en el dashboard general, no solo en el detalle.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">02</span>Pipeline visual</h3>
+      <ul>
+        <li>Vista Kanban arrastrable por etapa en <span class="ref">OpportunitiesPage.jsx</span> — hoy es lista tabular.</li>
+        <li>Alerta de "oportunidad estancada" cuando no hay actividad en N días (el dato ya existe en <span class="ref">crm_activities</span>, falta la regla y el aviso).</li>
+        <li>Checklist visual de completitud del Blue Sheet en vez de solo mostrar el score numérico.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">03</span>Calendario y correo</h3>
+      <ul>
+        <li>Actividades programadas → evento real en Google Calendar (Google Workspace ya está integrado en el resto de FamSPI, solo falta cablearlo aquí).</li>
+        <li>Registro automático de correos de Gmail relacionados a un contacto como actividad de timeline.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">04</span>Reportes y calidad de datos</h3>
+      <ul>
+        <li>Gráficos reales (no tablas crudas) en Dashboard, Pipeline y Forecast.</li>
+        <li>Exportar cualquier reporte a PDF (mismo patrón PDFKit ya usado en TI-assets y Business Case).</li>
+        <li>Fusión de duplicados: hoy <span class="ref">createAccount</span> ya detecta RUC duplicado y nombres parecidos — falta la acción de "fusionar" en vez de solo avisar.</li>
+        <li>Unificar <span class="ref">MANAGER_ROLES</span> (crm.service.js) y <span class="ref">managerRoles</span> (crm.routes.js) en una sola fuente — hoy son dos listas separadas y ya han causado inconsistencias de visibilidad.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi">Tiempo de carga de Cuenta 360 <b>&lt; 1.5s</b></div>
+    <div class="kpi">% oportunidades con Blue Sheet al día <b>≥ 80%</b></div>
+    <div class="kpi">Usuarios comerciales activos/semana <b>100%</b> del equipo</div>
+  </div>
+</section>
+
+<!-- ============================= PRO ============================= -->
+<section class="tier" id="pro">
+  <div class="tier-head">
+    <span class="badge">PLAN 2</span>
+    <h2>Senior Pro — paridad competitiva</h2>
+  </div>
+  <p class="tagline">
+    Aquí igualamos lo que hace un Salesforce Professional o un REXIS bien configurado — pero varias piezas
+    ya existen a medias en otros módulos de FamSPI, así que el costo real es mucho menor que construir desde cero.
+  </p>
+  <div class="stats">
+    <div><b class="num">2–3</b>meses</div>
+    <div><b>reuso</b>signature-workflows ya existente</div>
+    <div><b>nuevo</b>canal WhatsApp</div>
+  </div>
+
+  <div class="area-grid">
+    <div class="area">
+      <h3><span class="n">01</span>Automatización</h3>
+      <ul>
+        <li>Motor de reglas configurable "cuando cambia de etapa → crear tarea / notificar / mover a Business Case" — hoy ese puente existe pero está fijo en código (<span class="ref">crmPurchaseSync.service.js</span>), aquí se vuelve configurable desde <span class="ref">CrmSettingsPage</span>.</li>
+        <li>Asignación automática de leads (round-robin por carga o territorio) en vez de asignación manual.</li>
+        <li>Lead scoring basado en reglas: fuente, industria, monto estimado, actividad reciente.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">02</span>Firma y documentos</h3>
+      <ul>
+        <li>Generar propuesta/cotización desde plantilla directamente desde el Blue Sheet.</li>
+        <li>Enviar a firma sin salir del CRM, reutilizando el motor <span class="ref">signature-workflows</span> que ya usan Permisos, Vacaciones y Activos TI — cero infraestructura nueva, solo una nueva plantilla y punto de entrada.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">03</span>WhatsApp como actividad</h3>
+      <ul>
+        <li>Conversaciones de WhatsApp Business registradas automáticamente como actividad de cuenta/contacto.</li>
+        <li>Diferenciador real para el mercado ecuatoriano: en Salesforce/REXIS esto es un add-on pago aparte, no viene incluido.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">04</span>Cuotas, territorios y aprobaciones</h3>
+      <ul>
+        <li>Extender <span class="ref">sales_target_amount</span> (hoy solo por cuenta) a metas por vendedor y por mes.</li>
+        <li>Visibilidad jerárquica real: un manager ve el pipeline de su equipo, no solo "company/team/private" como hoy.</li>
+        <li>Aprobación de descuentos ("deal desk") antes de que una oportunidad entre a la etapa Contratos.</li>
+        <li>Modo offline para actividades y notas en campo, reusando el patrón de cola ya construido para asistencia (<span class="ref">attendanceOfflineQueue.js</span>).</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi">Ciclo de venta promedio <b>-15%</b></div>
+    <div class="kpi">Oportunidades con documento firmado sin salir del CRM <b>≥ 60%</b></div>
+    <div class="kpi">Cumplimiento de cuota mensual <b>visible en dashboard</b></div>
+  </div>
+
+  <div class="risk">
+    <b>Riesgo a vigilar —</b> el puente a Business Case/Compras hoy falla en silencio si el nombre de una etapa
+    no coincide exactamente (<span class="ref">STAGE_NAMES</span>). Antes de automatizar más reglas sobre ese puente,
+    conviene que ese fallo deje de ser silencioso y avise a un admin.
+  </div>
+</section>
+
+<!-- ============================= ULTRA ============================= -->
+<section class="tier" id="ultra">
+  <div class="tier-head">
+    <span class="badge">PLAN 3</span>
+    <h2>Senior Ultra — lo que Salesforce no puede vender</h2>
+  </div>
+  <p class="tagline">
+    Dejamos de perseguir el checklist de un CRM enterprise y apostamos por lo único que un proveedor externo
+    nunca podrá igualar sin años de integración a medida: un solo sistema donde el CRM, las compras, la firma
+    y la entrega real ya son la misma base de datos.
+  </p>
+  <div class="stats">
+    <div><b class="num">6+</b>meses</div>
+    <div><b>apuesta</b>diferenciadora, no de catálogo</div>
+    <div><b>IA</b>sobre datos propios</div>
+  </div>
+
+  <div class="area-grid">
+    <div class="area">
+      <h3><span class="n">01</span>Copiloto comercial</h3>
+      <ul>
+        <li>Resumen automático de cuenta: "qué pasó en los últimos 90 días", generado desde el timeline + Blue Sheet real, no una plantilla genérica.</li>
+        <li>Redacción asistida de correos y propuestas usando el contexto real (dolor del cliente, objetivo, competidor detectado).</li>
+        <li>Transcripción de llamadas/reuniones → actualización automática de actividad y de campos del Blue Sheet (voz a CRM).</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">02</span>Scoring predictivo real</h3>
+      <ul>
+        <li>Probabilidad de cierre entrenada con el histórico real de <span class="ref">crm_opportunities</span> (monto, fecha, etapa, resultado) — un modelo propio, no una caja negra comprada como "Einstein".</li>
+        <li>Predicción de riesgo de abandono de cuenta cruzando frecuencia de compra real (Business Case/Compras), no solo actividad en el CRM.</li>
+        <li>Coaching de Blue Sheet: detecta automáticamente red flags no declaradas (sin comprador económico, sin competidor registrado en una oportunidad grande) según la metodología Miller Heiman.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">03</span>Customer 360 verdadero</h3>
+      <ul>
+        <li>Una sola pantalla de cuenta que une oportunidades CRM + Business Cases + compras públicas/privadas + activos TI entregados + estado de firma de contrato + visitas comerciales — el dato ya vive en FamSPI, solo falta una vista que lo una.</li>
+        <li>La proyección comercial (meta, faltante, oportunidades necesarias) evoluciona a "qué le falta a esta cuenta para subir a Oro", con recomendación accionable, no solo el número.</li>
+        <li>Revenue Intelligence de ciclo completo: comparar el pipeline estimado contra lo realmente facturado — hoy la meta de venta es un número manual, esto la vuelve verificable.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">04</span>Búsqueda y autoservicio</h3>
+      <ul>
+        <li>Búsqueda conversacional sobre datos reales del CRM ("¿qué cuentas Oro no compran hace 90 días?"), con generación de consulta controlada — nunca acceso directo a la base.</li>
+        <li>Portal de autoservicio para cuentas clave (Oro/Plata): estado de pedido/entrega sin llamar a comercial, apalancando los estados que Business Case/Compras ya calculan.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="ai-note">
+    <span>🧠</span>
+    <span><b>Nota de costo/infraestructura —</b> este plan es el único que requiere gasto recurrente de modelo (LLM + posible vector store para búsqueda semántica). Se recomienda arrancar con un modelo económico para resumen/redacción y medir adopción real antes de invertir en el scoring predictivo entrenado, que es la pieza más cara de construir bien.</span>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi">Tiempo ahorrado por vendedor/semana <b>medido, no estimado</b></div>
+    <div class="kpi">Precisión del scoring predictivo vs. resultado real <b>seguimiento trimestral</b></div>
+    <div class="kpi">Cuentas Oro con facturación real visible <b>100%</b></div>
+  </div>
+</section>
+
+<footer class="close">
+  <h2>Cómo secuenciarlo</h2>
+  <p>Los tres planes son acumulativos, no alternativos — Pro necesita lo que Senior deja ordenado, y Ultra necesita el dato limpio que Pro empieza a automatizar. La recomendación práctica:</p>
+  <div class="steps">
+    <div><span class="idx">01</span> Aprobar y ejecutar <b>Senior</b> ya — es la base y tiene el menor riesgo.</div>
+    <div><span class="idx">02</span> Evaluar <b>Senior Pro</b> con datos reales de adopción de Senior (no en paralelo, para no repetir trabajo sobre una base todavía inestable).</div>
+    <div><span class="idx">03</span> Decidir <b>Senior Ultra</b> como apuesta explícita de inversión, no como continuación automática — es la única fase con costo recurrente de IA y vale la pena revisarla con presupuesto propio.</div>
+  </div>
+</footer>

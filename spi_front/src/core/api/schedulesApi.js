@@ -8,6 +8,8 @@ export const updateSchedule = (id, payload) => api.put(`/schedules/${id}`, paylo
 export const deleteSchedule = (id) => api.delete(`/schedules/${id}`).then((res) => res.data?.data);
 export const submitSchedule = (id) => api.post(`/schedules/${id}/submit`).then((res) => res.data?.data);
 export const addScheduledVisit = (id, payload) => api.post(`/schedules/${id}/visits`, payload).then((res) => res.data?.data);
+export const syncScheduleWeekCity = (id, payload) =>
+ api.post(`/schedules/${id}/weeks/sync-city`, payload).then((res) => res.data?.data);
 export const updateScheduledVisit = (id, visitId, payload) =>
  api.put(`/schedules/${id}/visits/${visitId}`, payload).then((res) => res.data?.data);
 export const deleteScheduledVisit = (id, visitId) =>
@@ -18,7 +20,7 @@ export const justifySchedule = (id, justification) =>
   api.post(`/schedules/${id}/justify`, { justification }).then((res) => res.data?.data);
 export const fetchPendingSchedules = () =>
  api.get("/schedules/pending-approval").then((res) => res.data?.data || []);
-export const approveSchedule = (id, notes) =>
+export const approveSchedule = (id, notes = null) =>
  api.post(`/schedules/${id}/approve`, { notes }).then((res) => res.data?.data);
 export const rejectSchedule = (id, notes) =>
  api.post(`/schedules/${id}/reject`, { notes, rejection_reason: notes }).then((res) => res.data?.data);
@@ -39,8 +41,9 @@ const schedulesApi = {
  createSchedule,
  updateSchedule,
  deleteSchedule,
- submitSchedule,
+  submitSchedule,
   addScheduledVisit,
+  syncScheduleWeekCity,
   updateScheduledVisit,
   deleteScheduledVisit,
   justifyScheduledVisit,

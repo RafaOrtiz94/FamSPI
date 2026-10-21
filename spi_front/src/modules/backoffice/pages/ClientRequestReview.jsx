@@ -100,6 +100,7 @@ const ClientRequestReview = () => {
  const refresh = () => fetchRequestRef.current(id);
  useEffect(() => {
  refresh();
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [id]);
 
  useScopedAutoUpdate(

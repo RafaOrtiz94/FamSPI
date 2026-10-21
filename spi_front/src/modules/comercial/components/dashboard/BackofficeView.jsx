@@ -13,6 +13,7 @@ import {
 import Card from "../../../../core/ui/components/Card";
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 import { useAuth } from "../../../../core/auth/useAuth";
+import BusinessCasePendingWidget from "../../../../core/ui/widgets/BusinessCasePendingWidget";
 
 const BackofficeView = ({ onRefresh }) => {
  const navigate = useNavigate();
@@ -79,7 +80,7 @@ const BackofficeView = ({ onRefresh }) => {
  title: "Solicitudes de compra",
  subtitle: "Handoff y seguimiento hacia ACP",
  icon: FiShoppingCart,
- route: "/dashboard/comercial/equipment-purchases",
+ route: "/dashboard/purchases/workspace?tab=public",
  },
  ];
  }, [isBackofficeCommercial]);
@@ -100,6 +101,10 @@ const BackofficeView = ({ onRefresh }) => {
  />
 
  {/* Permisos y vacaciones se gestionan desde la seccion dedicada en la barra de navegacion */}
+
+ <div className="mb-6">
+ <BusinessCasePendingWidget />
+ </div>
 
  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
  {cards.map((card) => (

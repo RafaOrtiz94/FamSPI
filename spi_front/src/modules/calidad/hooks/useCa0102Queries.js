@@ -34,7 +34,7 @@ export const useGetActiveLogs = () =>
       const { data } = await api.get("/calidad/cleaning/logs");
       return data.data;
     },
-    refetchInterval: 60000,
+    refetchInterval: 600000, // >5min: deja hueco para que Neon autosuspenda entre polls
   });
 
 export const useRegisterCleaning = () => {

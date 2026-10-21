@@ -4,6 +4,8 @@ jest.mock("../../../config/db", () => ({
   query: jest.fn(),
   getClient: jest.fn(),
 }));
+// uuid 13 es solo ESM y Jest (CJS) no lo interpreta; misma convencion que el resto de suites.
+jest.mock("uuid", () => ({ v4: () => "00000000-0000-4000-8000-000000000000" }));
 
 const businessCaseService = require("../businessCase.service");
 

@@ -1,0 +1,5 @@
+sheet,cell,row,column,source,target_header,value_state,reason,label,description
+b101,E6,6,E/5,objective,DET/AÑO/PROCESO,empty,target_column_empty,COBAS B101 HBA1C TEST 10PC (DIA CLAIM),"Rellenar columna 'DET/AÑO/PROCESO' en b101!E6 (fila 6, columna E/5). Contexto de fila: 'COBAS B101 HBA1C TEST 10PC (DIA CLAIM)' en B6."
+b101,E7,7,E/5,objective,DET/AÑO/PROCESO,empty,target_column_empty,COBAS B 101 LIPID PANEL 10PC,"Rellenar columna 'DET/AÑO/PROCESO' en b101!E7 (fila 7, columna E/5). Contexto de fila: 'COBAS B 101 LIPID PANEL 10PC' en B7."
+b101,H6,6,H/8,objective,PRODUCTO A ENVIAR,empty,target_column_empty,COBAS B101 HBA1C TEST 10PC (DIA CLAIM),"Rellenar columna 'PRODUCTO A ENVIAR' en b101!H6 (fila 6, columna H/8). Contexto de fila: 'COBAS B101 HBA1C TEST 10PC (DIA CLAIM)' en B6."
+b101,H7,7,H/8,objective,PRODUCTO A ENVIAR,empty,target_column_empty,COBAS B 101 LIPID PANEL 10PC,"Rellenar columna 'PRODUCTO A ENVIAR' en b101!H7 (fila 7, columna H/8). Contexto de fila: 'COBAS B 101 LIPID PANEL 10PC' en B7."

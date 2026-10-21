@@ -1,0 +1,12 @@
+const express = require("express"); const router = express.Router(); const { verifyToken } = require("../../middlewares/auth"); const { requireRole } = require("../../middlewares/roles"); const ctrl = require("./ca0107.controller");
+router.use(verifyToken);
+router.post("/intake", requireRole(["calidad", "gerencia"]), ctrl.createIntake);
+router.get("/intake", requireRole(["calidad", "gerencia"]), ctrl.listIntake);
+router.post("/investigation", requireRole(["calidad", "gerencia"]), ctrl.createInvestigation);
+router.get("/investigation", requireRole(["calidad", "gerencia"]), ctrl.listInvestigation);
+router.post("/refunds", requireRole(["calidad", "gerencia"]), ctrl.createRefund);
+router.get("/refunds", requireRole(["calidad", "gerencia"]), ctrl.listRefunds);
+router.post("/capa-link", requireRole(["calidad", "gerencia"]), ctrl.createCapaLink);
+router.get("/capa-link", requireRole(["calidad", "gerencia"]), ctrl.listCapaLink);
+router.put("/workflows/transition", requireRole(["calidad"]), ctrl.transitionRecord);
+module.exports = router;

@@ -11,13 +11,13 @@ const Input = ({
   ...rest
 }) => (
   <div className={containerClassName}>
-    {label && <label className="mb-1 block text-sm font-medium text-gray-700">{label}</label>}
+    {label && <label className="mb-1.5 block text-sm font-semibold text-slate-700">{label}</label>}
     <input
       type={type}
       value={value}
       onChange={onChange}
       placeholder={placeholder}
-      className={`w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 ${className}`}
+      className={`w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 transition placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500 ${className}`}
       {...rest}
     />
   </div>

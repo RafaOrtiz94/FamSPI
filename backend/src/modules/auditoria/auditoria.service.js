@@ -109,8 +109,10 @@ async function listAudits(options = {}) {
   const countSql = `SELECT COUNT(*) FROM auditoria.logs a ${where};`;
 
   const queryParams = [...params, limit, offset];
-  const { rows } = await db.query(sql, queryParams);
-  const { rows: totalRows } = await db.query(countSql, params);
+  const [{ rows }, { rows: totalRows }] = await Promise.all([
+    db.query(sql, queryParams),
+    db.query(countSql, params),
+  ]);
 
   const total = parseInt(totalRows[0]?.count || 0, 10);
 

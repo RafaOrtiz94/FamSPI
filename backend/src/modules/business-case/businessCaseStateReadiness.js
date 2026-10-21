@@ -11,6 +11,21 @@
  */
 
 const { STATES } = require('./businessCaseStates.constants');
+const db = require('../../config/db');
+
+/**
+ * Safely parse the `extra` JSON field from a business case.
+ * Returns {} if null, already an object, or malformed JSON.
+ */
+function parseExtraField(extra) {
+  if (!extra) return {};
+  if (typeof extra === 'object') return extra;
+  try {
+    return JSON.parse(extra);
+  } catch {
+    return {};
+  }
+}
 
 // Helper function to determine if business case is public or private
 function getBusinessCaseFlowType(businessCase) {
@@ -29,64 +44,51 @@ const STATE_READINESS_REQUIREMENTS = {
         field: 'client_name',
         section: 'general',
         friendlyName: 'Nombre del cliente',
+        // client_id NO es requisito aqui a proposito: en esta etapa el
+        // cliente puede ser un prospecto sin registrar formalmente en el
+        // catalogo de clientes. Basta con el nombre libre.
         validator: (bc) => bc.client_name && bc.client_name.trim().length > 0,
         errorMessage: 'El nombre del cliente es obligatorio'
-      },
-      {
-        field: 'client_id',
-        section: 'general',
-        friendlyName: 'ID del cliente',
-        validator: (bc) => bc.client_id && bc.client_id > 0,
-        errorMessage: 'Debe seleccionar un cliente válido'
       },
       {
         field: 'business_case_type',
         section: 'general',
         friendlyName: 'Tipo de caso de negocio',
-        validator: (bc) => bc.business_case_type && ['comodato_publico', 'comodato_privado', 'venta_privada'].includes(bc.business_case_type),
+        // business_case_type y bc_purchase_type representan el mismo concepto
+        // con dos convenciones de nombres distintas (ver getBusinessCaseFlowType
+        // arriba, que ya hace este mismo fallback para LEER el tipo). Los BC
+        // creados via flujo automatico (ensureAutoBusinessCaseForPurchase /
+        // ensureBusinessCaseForComodato) solo llenan bc_purchase_type
+        // ('public' / 'private_comodato'), nunca business_case_type -- sin
+        // este fallback, esos BCs nunca podian avanzar de estado.
+        validator: (bc) => {
+          if (bc.business_case_type && ['comodato_publico', 'comodato_privado', 'venta_privada'].includes(bc.business_case_type)) {
+            return true;
+          }
+          return ['public', 'private_comodato', 'comodato_publico', 'comodato_privado'].includes(String(bc.bc_purchase_type || '').trim());
+        },
         errorMessage: 'Debe seleccionar un tipo de caso de negocio válido'
       },
       {
         field: 'primary_equipment',
         section: 'equipment',
         friendlyName: 'Equipo principal',
-        validator: (bc) => {
-          // Check if equipment is selected (this would need to be queried from related tables)
-          // For now, check if we have equipment cost as proxy
-          return bc.bc_equipment_cost && bc.bc_equipment_cost > 0;
+        validator: async (bc) => {
+          const bcId = bc.business_case_id || bc.id;
+          if (!bcId) return false;
+          const { rows } = await db.query(
+            `SELECT 1 FROM bc_equipment_selection WHERE business_case_id = $1 AND is_primary = true LIMIT 1`,
+            [bcId]
+          );
+          return rows.length > 0;
         },
         errorMessage: 'Debe seleccionar y configurar el equipo principal'
       },
-      // Branching requirements based on business case type
-      {
-        field: 'flow_specific_data',
-        section: 'general',
-        friendlyName: 'Datos específicos del flujo',
-        validator: (bc) => {
-          const flowType = getBusinessCaseFlowType(bc);
-
-          if (flowType === 'PUBLIC') {
-            // PUBLIC flow: Check for SERCOF code and contracting object
-            const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
-            return extra && extra.sercof_code && extra.sercof_code.trim().length > 0 &&
-                   extra.contracting_object && extra.contracting_object.trim().length > 0;
-          } else {
-            // PRIVATE flow: Check for backoffice client data
-            const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
-            return extra && extra.backoffice_client_data &&
-                   extra.backoffice_client_data.client_code &&
-                   extra.backoffice_client_data.client_code.trim().length > 0;
-          }
-        },
-        errorMessage: (bc) => {
-          const flowType = getBusinessCaseFlowType(bc);
-          if (flowType === 'PUBLIC') {
-            return 'Para casos públicos se requiere código SERCOF y objeto contractual';
-          } else {
-            return 'Para casos privados se requieren datos del cliente en backoffice';
-          }
-        }
-      }
+      // NOTA: el requisito de "flow_specific_data" (sercof_code/contracting_object
+      // para publico, backoffice_client_data para privado) se removio de esta
+      // transicion a pedido del usuario -- esos datos se completan mas
+      // adelante en el flujo, no son necesarios tan temprano como
+      // DRAFT_INICIAL -> DATOS_BASE_COMPLETOS.
     ]
   },
 
@@ -100,9 +102,13 @@ const STATE_READINESS_REQUIREMENTS = {
         section: 'determinations',
         friendlyName: 'Determinaciones',
         validator: async (bc) => {
-          // This would check if determinations are configured
-          // For now, we'll assume this passes - actual implementation would query determinations table
-          return true; // Placeholder
+          const bcId = bc.business_case_id || bc.id;
+          if (!bcId) return false;
+          const { rows } = await db.query(
+            `SELECT 1 FROM bc_determinations WHERE business_case_id = $1 LIMIT 1`,
+            [bcId]
+          );
+          return rows.length > 0;
         },
         errorMessage: 'Debe configurar al menos una determinación'
       },
@@ -112,7 +118,7 @@ const STATE_READINESS_REQUIREMENTS = {
         friendlyName: 'Inversión base',
         validator: (bc) => {
           // Check if there's at least a base investment configured
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
           return extra && extra.investments && extra.investments.length > 0;
         },
         errorMessage: 'Debe configurar al menos una inversión base'
@@ -122,7 +128,7 @@ const STATE_READINESS_REQUIREMENTS = {
         section: 'equipment',
         friendlyName: 'Datos económicos',
         validator: (bc) => {
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
           return extra && extra.economic_data;
         },
         errorMessage: 'Debe completar la configuración económica del equipo'
@@ -134,7 +140,7 @@ const STATE_READINESS_REQUIREMENTS = {
         friendlyName: 'Datos específicos de evaluación',
         validator: (bc) => {
           const flowType = getBusinessCaseFlowType(bc);
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
 
           if (flowType === 'PUBLIC') {
             // PUBLIC flow: Check for reservation image and contracting validation
@@ -167,11 +173,13 @@ const STATE_READINESS_REQUIREMENTS = {
         field: 'viability_evaluation',
         section: 'determinations',
         friendlyName: 'Evaluación de viabilidad',
-        validator: async (bc) => {
-          // Check if viability evaluation has been performed
-          // This would check evaluation results/status
-          return true; // Placeholder - actual implementation would check evaluation status
-        },
+        // No bloqueante deliberadamente: hoy no existe en el modulo un mecanismo
+        // para capturar "motivo de la observacion" en el momento en que se
+        // levanta (solo existe el checkeo inverso, resolution_notes, para
+        // volver de OBSERVADO a EN_EVALUACION). Implementar un chequeo aqui
+        // exigiria inventar un campo que ningun flujo real escribe todavia.
+        // Si se agrega esa captura, reemplazar este validador por uno real.
+        validator: async () => true,
         errorMessage: 'Debe completar la evaluación de viabilidad antes de marcar como observado'
       }
     ]
@@ -186,10 +194,13 @@ const STATE_READINESS_REQUIREMENTS = {
         field: 'viability_assessment',
         section: 'determinations',
         friendlyName: 'Evaluación de viabilidad',
+        // Fuente real: businessCase.service.js (saveFeasibilityDecision-equivalente)
+        // guarda el resultado en modern_bc_metadata.feasibility.status
+        // ('factible' | 'no_factible') al registrar la decision de viabilidad.
         validator: async (bc) => {
-          // Check if viability assessment passed
-          // This would check evaluation results
-          return true; // Placeholder - actual implementation would check assessment results
+          const metadata = parseExtraField(bc.modern_bc_metadata);
+          const feasibility = parseExtraField(metadata.feasibility);
+          return feasibility.status === 'factible';
         },
         errorMessage: 'La evaluación de viabilidad debe ser positiva para marcar como viable'
       },
@@ -197,9 +208,13 @@ const STATE_READINESS_REQUIREMENTS = {
         field: 'roi_calculation',
         section: 'determinations',
         friendlyName: 'Cálculo de ROI',
+        // Mismo origen: la decision de factibilidad guarda los calculos
+        // recibidos en modern_bc_metadata.feasibility.decision.calculations.
         validator: async (bc) => {
-          // Check if ROI calculation is complete and positive
-          return true; // Placeholder - actual implementation would check ROI results
+          const metadata = parseExtraField(bc.modern_bc_metadata);
+          const feasibility = parseExtraField(metadata.feasibility);
+          const decision = parseExtraField(feasibility.decision);
+          return Boolean(decision.calculations);
         },
         errorMessage: 'Debe completar el cálculo de ROI con resultado positivo'
       }
@@ -217,7 +232,7 @@ const STATE_READINESS_REQUIREMENTS = {
         friendlyName: 'Notas de resolución',
         validator: (bc) => {
           // Check if resolution notes are provided
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
           return extra && extra.resolution_notes && extra.resolution_notes.trim().length > 0;
         },
         errorMessage: 'Debe proporcionar notas de resolución de las observaciones encontradas'
@@ -228,7 +243,7 @@ const STATE_READINESS_REQUIREMENTS = {
         friendlyName: 'Resolución de problemas',
         validator: (bc) => {
           // Check if identified issues have been addressed
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
           return extra && extra.issues_resolved === true;
         },
         errorMessage: 'Debe resolver todos los problemas identificados antes de reingresar a evaluación'
@@ -246,7 +261,7 @@ const STATE_READINESS_REQUIREMENTS = {
         section: 'investments',
         friendlyName: 'Plan operativo básico',
         validator: (bc) => {
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
           return extra && extra.operational_plan && Object.keys(extra.operational_plan).length > 0;
         },
         errorMessage: 'Debe crear un plan operativo básico antes de pasar a ajustes'
@@ -256,10 +271,43 @@ const STATE_READINESS_REQUIREMENTS = {
         section: 'determinations',
         friendlyName: 'Aprobación de viabilidad',
         validator: (bc) => {
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
           return extra && extra.viability_approved === true;
         },
         errorMessage: 'Requiere aprobación formal de la evaluación de viabilidad'
+      }
+    ]
+  },
+
+  // ANY CANCELLABLE STATE → CANCELADO (reason required — validated at caller level via `reason` param)
+  // No field-level readiness required; cancellation is always permitted with a reason.
+  // This entry exists so getTransitionRequirements returns a defined spec.
+  ...Object.fromEntries(
+    ['DRAFT_INICIAL', 'DATOS_BASE_COMPLETOS', 'EN_EVALUACION_VIABILIDAD',
+     'OBSERVADO_POR_VIABILIDAD', 'VIABLE', 'AJUSTES_OPERATIVOS'].map(fromKey => [
+      `${STATES[fromKey]}:${STATES.CANCELADO}`,
+      {
+        name: 'Cancelación del Business Case',
+        description: 'El Business Case será cancelado. Esta acción no puede deshacerse.',
+        requirements: [] // reason enforced at state machine transition call, not field-level
+      }
+    ])
+  ),
+
+  // CERRADO_PARA_APROBACION → RECHAZADO_POR_GERENCIA
+  [`${STATES.CERRADO_PARA_APROBACION}:${STATES.RECHAZADO_POR_GERENCIA}`]: {
+    name: 'Rechazo por Gerencia',
+    description: 'Gerencia rechaza el Business Case. Debe incluir motivo de rechazo.',
+    requirements: [
+      {
+        field: 'rejection_notes',
+        section: 'general',
+        friendlyName: 'Motivo de rechazo',
+        validator: (bc) => {
+          const extra = parseExtraField(bc.extra);
+          return extra && extra.rejection_notes && extra.rejection_notes.trim().length > 0;
+        },
+        errorMessage: 'Debe proporcionar el motivo del rechazo por parte de gerencia'
       }
     ]
   },
@@ -274,7 +322,7 @@ const STATE_READINESS_REQUIREMENTS = {
         section: 'general',
         friendlyName: 'Documentación final',
         validator: (bc) => {
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
           return extra && extra.final_documentation_complete === true;
         },
         errorMessage: 'Debe completar toda la documentación final'
@@ -284,7 +332,7 @@ const STATE_READINESS_REQUIREMENTS = {
         section: 'investments',
         friendlyName: 'Contrato preparado',
         validator: (bc) => {
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
           return extra && extra.contract_ready === true;
         },
         errorMessage: 'El contrato debe estar preparado y revisado'
@@ -294,7 +342,7 @@ const STATE_READINESS_REQUIREMENTS = {
         section: 'general',
         friendlyName: 'Verificación final',
         validator: (bc) => {
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
           return extra && extra.final_approval_check_passed === true;
         },
         errorMessage: 'Debe pasar la verificación final de aprobación'
@@ -306,7 +354,7 @@ const STATE_READINESS_REQUIREMENTS = {
         friendlyName: 'Aprobaciones específicas del flujo',
         validator: (bc) => {
           const flowType = getBusinessCaseFlowType(bc);
-          const extra = typeof bc.extra === 'string' ? JSON.parse(bc.extra) : bc.extra;
+          const extra = parseExtraField(bc.extra);
 
           if (flowType === 'PUBLIC') {
             // PUBLIC flow: Check for public tender approval and legal review
@@ -416,6 +464,56 @@ class BusinessCaseStateReadiness {
    */
   static getAllRequirements() {
     return { ...STATE_READINESS_REQUIREMENTS };
+  }
+
+  /**
+   * Get per-section completeness for a business case's next-state requirements.
+   * Returns how many requirements pass per section, useful for progress indicators.
+   * @param {object} businessCase - Complete BC object
+   * @returns {object} { sectionId: { passed, total, percent } }
+   */
+  static async getSectionCompleteness(businessCase) {
+    const currentState = businessCase.canonical_state;
+    const { TRANSITIONS } = require('./businessCaseStates.constants');
+    const nextStates = TRANSITIONS[currentState] || [];
+
+    // Aggregate requirements from all reachable next-state transitions
+    const sectionRequirements = {};
+
+    for (const nextState of nextStates) {
+      const key = `${currentState}:${nextState}`;
+      const spec = STATE_READINESS_REQUIREMENTS[key];
+      if (!spec) continue;
+
+      for (const req of spec.requirements) {
+        const sec = req.section;
+        if (!sectionRequirements[sec]) sectionRequirements[sec] = [];
+        // Deduplicate by field
+        if (!sectionRequirements[sec].find(r => r.field === req.field)) {
+          sectionRequirements[sec].push(req);
+        }
+      }
+    }
+
+    const result = {};
+    for (const [section, reqs] of Object.entries(sectionRequirements)) {
+      let passed = 0;
+      for (const req of reqs) {
+        try {
+          const ok = await req.validator(businessCase);
+          if (ok) passed++;
+        } catch {
+          // validator error = not passed
+        }
+      }
+      result[section] = {
+        passed,
+        total: reqs.length,
+        percent: reqs.length > 0 ? Math.round((passed / reqs.length) * 100) : 100
+      };
+    }
+
+    return result;
   }
 
   /**

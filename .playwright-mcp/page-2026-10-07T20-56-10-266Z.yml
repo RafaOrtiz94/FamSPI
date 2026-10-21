@@ -1,0 +1,18 @@
+- generic [ref=e2]:
+  - generic [ref=e6]:
+    - img "FamProject Logo" [ref=e7]
+    - heading "Portal Corporativo" [level=2] [ref=e8]
+    - paragraph [ref=e9]: Sistema Interno — Departamento de TI
+    - generic [ref=e10]:
+      - generic [ref=e11]: Instala FamSPI en este dispositivo
+      - generic [ref=e15]:
+        - paragraph [ref=e16]: 1. Pulsa Instalar app.
+        - paragraph [ref=e17]: 2. Confirma la instalacion del sistema.
+        - paragraph [ref=e18]: 3. Abre FamSPI desde el acceso directo y continua.
+    - button [ref=e19] [cursor=pointer]:
+      - img "Google" [ref=e20]
+      - text: Iniciar sesion con Google
+    - paragraph [ref=e21]: © 2026 FamProject · Todos los derechos reservados
+    - button "Acceso pasantes" [ref=e22] [cursor=pointer]
+  - status "Ambiente STAGING LOCAL":
+    - generic: STAGING LOCAL · datos de prueba
