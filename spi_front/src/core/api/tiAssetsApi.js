@@ -214,6 +214,17 @@ const openPdfPrintDialog = async (apiPath, fallbackFilename) => {
  window.setTimeout(() => URL.revokeObjectURL(url), 60000);
 };
 
+// F.TI-01 lleno (formato controlado del cronograma de mantenimiento), en PDF.
+export const downloadTiFti01 = async (year) => {
+ const safeYear = Number(year) || new Date().getFullYear();
+ await triggerBlobDownload(`/ti-assets/reports/fti01?year=${safeYear}`, `F.TI-01_Cronograma_mantenimiento_${safeYear}.pdf`);
+};
+
+export const startTiFti01SignatureWorkflow = async ({ year, prepared_by_user_id, approved_by_user_id }) => {
+ const { data } = await api.post("/ti-assets/reports/fti01/signature-workflow", { year, prepared_by_user_id, approved_by_user_id });
+ return data?.data || null;
+};
+
 export const downloadTiMaintenanceReport = async ({ period_type = "annual", year, month } = {}) => {
  const params = new URLSearchParams();
  if (period_type) params.set("period_type", period_type);

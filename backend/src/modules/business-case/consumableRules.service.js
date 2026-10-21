@@ -13,6 +13,11 @@ const referenceService = require("./referenceConsumption.service");
 const referenceConsumption = require("./referenceConsumption");
 const { RULE_BY_CODE: MANUAL_RULE_BY_CODE } = require("./consumableEquipmentManual");
 const cobasQuantities = require("./calculationPackages/immunoChemistryCobasQuantities.package");
+const { predictByQcCalendar } = require("./qcCalendarRule");
+
+// Categoria de equipo (v_equipment_full_catalog.category) de los procesos de referencia cargados
+// (cobas pro = "configuracion"): solo entre estas se comparte la mediana de familia.
+const REFERENCE_EQUIPMENT_FAMILIES = new Set(["chemistry", "immunology", "configuracion"]);
 
 // Bloque del libro auditado -> tipo de producto del Business Case.
 const AUDITED_BLOCK_TYPES = Object.freeze({
@@ -114,6 +119,7 @@ function addDiscovery(targets, target) {
   if (!current.itemKey && target.itemKey) current.itemKey = target.itemKey;
   if (current.annualQty === null && target.annualQty !== null) current.annualQty = target.annualQty;
   if (current.plannedQty === null && target.plannedQty !== null) current.plannedQty = target.plannedQty;
+  if (!current.unitsPerPack && target.unitsPerPack) current.unitsPerPack = target.unitsPerPack;
 }
 
 async function loadRuleData(businessCaseId, initialCodes) {
@@ -198,6 +204,7 @@ function buildTargets(data, specsByCode) {
       name: item.name || null,
       annualQty: finiteNumberOrNull(item.annual_qty),
       plannedQty: finiteNumberOrNull(item.planned_qty),
+      unitsPerPack: finiteNumberOrNull(item.units_per_pack),
       // Reactivos: DET/AÑO/PROCESO del Sheet del BC = demanda real del laboratorio, no se predice.
       demandSource: normalizeItemType(item.item_type) === "reactivo" && Number(item.annual_qty) > 0 ? "sheet" : "business_case",
       discoveredFrom: [{ source: "bc_consumption_items", itemKey: item.item_key || null }],
@@ -543,7 +550,10 @@ function buildSimulationModel({ equipment, items, data, environment, specsByCode
     // Solo productos en uso: si ningun reactivo con demanda lo necesita, el cliente no lo consume.
     const candidates = items.filter((item) => item.itemType !== "reactivo" && item.lineage?.usage?.inUse !== false).map((item) => ({
       key: `${item.itemType}::${item.supplierCode}`, code: String(item.supplierCode).replace(/^0+/, ""), name: item.name,
-      itemType: item.itemType, module: referenceConsumption.__testables.moduleOf(item.name || ""),
+      // Las referencias son de analizadores de quimica/inmuno: otro tipo de equipo (orina, hematologia...)
+      // queda en su propia familia y no hereda su mediana.
+      itemType: item.itemType, module: !item.family || REFERENCE_EQUIPMENT_FAMILIES.has(item.family)
+        ? referenceConsumption.__testables.moduleOf(item.name || "") : item.family,
       inUse: item.lineage?.usage?.inUse === true,
     }));
     referenceConsumption.predictFromReferences(candidates, data.references, { months })
@@ -553,11 +563,15 @@ function buildSimulationModel({ equipment, items, data, environment, specsByCode
   }
   items.forEach((item) => {
     if (item.itemType === "reactivo") return;
-    const reference = referenceByKey.get(`${item.itemType}::${item.supplierCode}`) || null;
     const document = item.sources?.officialDocument;
     const formulaQuantity = item.sources?.auditedFormula?.status === "calculated" ? item.sources.auditedFormula.quantity : null;
     const documentCalculated = document?.status === "calculated" && document.quantity > 0;
     const historyQuantity = data.deliveryHistory?.get(`${item.itemType}::${String(item.supplierCode).replace(/^0+/, "")}`) ?? null;
+    // Sin ficha, sin historial y sin referencia (equipo con pocas variables): calendario de QC del laboratorio.
+    const withoutEvidence = !(historyQuantity > 0) && !documentCalculated && !(formulaQuantity > 0)
+      && document?.basis !== "equipment_manual" && !specsByCode.get(item.supplierCode);
+    const reference = referenceByKey.get(`${item.itemType}::${item.supplierCode}`)
+      || (withoutEvidence ? predictByQcCalendar({ itemType: item.itemType, unitsPerPack: item.unitsPerPack, months, environment }) : null);
     // Lo entregado de verdad (por el cliente, o por otros clientes): entra aunque la ficha no permita calcularlo.
     if ((historyQuantity > 0 || reference) && !documentCalculated && !(formulaQuantity > 0) && document?.basis !== "equipment_manual") {
       components.push({
@@ -671,6 +685,7 @@ function serializeItem(target, data, environment, spec, override) {
     supplierCode: target.supplierCode,
     itemKey: target.itemKey,
     name: target.name,
+    unitsPerPack: target.unitsPerPack ?? null,
   };
   const inputs = {
     processDurationMonths: {

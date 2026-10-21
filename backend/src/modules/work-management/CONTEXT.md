@@ -17,6 +17,10 @@ A diferencia de casi todos los demás módulos del backend, `workManagement.rout
 
 Esto es intencional para esta fase (documentado como riesgo conocido): no hay RBAC por área/rol de negocio dentro del módulo, solo `module_access` (¿puede entrar?) + membresía/`isManager` (¿qué ve?).
 
+**Acceso para todos los colaboradores (2026-10-19):** el router rechaza con 403 a los usuarios externos (`ROLE_GROUPS.ext_users`: `ing_servicio_ext`, `esp_app_ext`); cualquier otro colaborador autenticado entra. En el frontend la ruta `/dashboard/work-management` ya no tiene lista de roles (`<ProtectedRoute />` sin `allowedRoles`) y `NavigationBar.jsx#getPriorityGroups` agrega el enlace a todo usuario interno que no lo tenga por su area (test: `core/ui/components/__tests__/NavigationBar.workManagement.test.js`). Motivo: cualquiera puede ser responsable o apoyo de una tarea (caso jefe_financiero, que no lo veia).
+
+**Correo al asignar un apoyo:** `addItemSupporter` avisa por correo (y en la app) cada vez que se asigna a alguien como apoyo: apoyo nuevo o ya existente con contexto distinto. Usa `ignoreEmailSchedule: true`, asi que el correo sale tambien fuera del horario 8:00-19:00 (antes solo avisaba al apoyo nuevo y fuera de horario el correo se descartaba).
+
 ## 3. Endpoints
 
 Prefijo: `/api/v1/work-management`. Todos requieren JWT (`verifyToken`) + `module_access` de `work_management` (ver §2). Ninguno tiene restricción de rol adicional a nivel de ruta.

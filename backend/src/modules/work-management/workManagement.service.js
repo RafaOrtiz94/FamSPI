@@ -1861,8 +1861,16 @@ async function addItemSupporter(itemId, payload, userId, role) {
   const client = await db.getClient();
   let project = null;
   let isNewSupporter = false;
+  let contextChanged = false;
   try {
     await client.query("BEGIN");
+
+    // Contexto anterior: si ya era apoyo y se le asigna con otro contexto, tambien se le avisa.
+    const { rows: previousRows } = await client.query(
+      `SELECT context FROM work_management.followers WHERE item_id = $1 AND user_id = $2`,
+      [itemId, supporterId]
+    );
+    contextChanged = previousRows.length > 0 && String(previousRows[0].context || "").trim() !== context;
 
     const { rows: insertRows } = await client.query(
       `INSERT INTO work_management.followers
@@ -1923,16 +1931,23 @@ async function addItemSupporter(itemId, payload, userId, role) {
     client.release();
   }
 
-  if (isNewSupporter) {
+  // Correo en cada asignacion (nueva o con contexto distinto), tambien fuera del horario laboral:
+  // la persona debe enterarse de que la necesitan (pedido 2026-10-19).
+  if (isNewSupporter || contextChanged) {
+    if (!project) {
+      const { rows: projectRows } = await db.query(`SELECT id, name FROM work_management.projects WHERE id = $1`, [currentItem.project_id]);
+      project = projectRows[0] || null;
+    }
     try {
       await notificationManager.sendNotification({
         userId: supporterId,
-        customTitle: "Te asignaron como apoyo",
+        customTitle: isNewSupporter ? "Te asignaron como apoyo" : "Se actualizo tu apoyo",
         customMessage:
-          `Fuiste asignado como apoyo en "${currentItem.title}"` +
+          `${isNewSupporter ? "Fuiste asignado como apoyo" : "Se actualizo el apoyo que te pidieron"} en "${currentItem.title}"` +
           (project?.name ? ` del proyecto "${project.name}".` : ".") +
           `\n\nContexto solicitado: ${context}`,
         email: true,
+        ignoreEmailSchedule: true,
         chat: false,
         priority: 0,
         source: "work_management.item.supporter_assigned",
@@ -1952,7 +1967,7 @@ async function addItemSupporter(itemId, payload, userId, role) {
     }
   }
 
-  return { item_id: itemId, supporter_user_id: supporterId, context, is_new: isNewSupporter };
+  return { item_id: itemId, supporter_user_id: supporterId, context, is_new: isNewSupporter, context_changed: contextChanged };
 }
 
 async function removeItemSupporter(itemId, supporterUserId, userId, role) {

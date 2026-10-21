@@ -883,40 +883,9 @@ const AppRoutes = () => {
             <Route path="/dashboard/purchases/workspace" element={<PurchasesWorkspace />} />
           </Route>
 
-          <Route
-            element={
-              <ProtectedRoute
-                allowedRoles={[
-                  "comercial",
-                  "jefe_comercial",
-                  "backoffice_comercial",
-                  "asesor_comercial",
-                  "analista_comercial",
-                  "acp_comercial",
-                  "backoffice",
-                  "gerencia",
-                  "gerencia_general",
-                  "gerente_general",
-                  "director",
-                  "gerente",
-                  "jefe_ti",
-                  "jefe_de_ti",
-                  "admin",
-                  "administrador",
-                  "jefe_servicio",
-                  "jefe_servicio_tecnico",
-                  "jefe_tecnico",
-                  "ing_servicio",
-                  "esp_app",
-                  "tecnico",
-                  "operaciones",
-                  "jefe_operaciones",
-                  "logistica",
-                  "jefe_logistica",
-                ]}
-              />
-            }
-          >
+          {/* Work Management: abierto a todos los colaboradores (cualquiera puede ser responsable o
+              apoyo de una tarea). Los usuarios externos los rechaza el backend (workManagement.routes.js). */}
+          <Route element={<ProtectedRoute />}>
             <Route path="/dashboard/work-management" element={<WorkManagementPage />} />
             <Route path="/dashboard/work-management/projects/:projectId" element={<WorkManagementPage />} />
           </Route>

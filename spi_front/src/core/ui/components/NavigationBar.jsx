@@ -450,7 +450,7 @@ const collabResumenLink = {
 };
 
 // Sistema de prioridades por rol
-const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
+export const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
   const roleSet = new Set(
     String(role || "")
       .split(",")
@@ -696,6 +696,14 @@ const getPriorityGroups = (scope, role, auditActive, extraRoles = []) => {
   // forma de llegar a la pagina desde el navbar.
   if (!groups.primary.includes(pruebasTecnicasLink) && !groups.secondary.includes(pruebasTecnicasLink)) {
     groups.secondary.push(pruebasTecnicasLink);
+  }
+
+  // Work Management: todos los colaboradores pueden ser responsables o apoyo de una tarea, asi que
+  // el acceso no depende del area (pedido 2026-10-19, ej. jefe_financiero no lo veia). Los usuarios
+  // externos quedan fuera (el backend tambien los rechaza).
+  const isExternalUser = ["ing_servicio_ext", "esp_app_ext"].includes(scope) || ["ing_servicio_ext", "esp_app_ext"].includes(role);
+  if (!isExternalUser && !Object.values(groups).some((group) => group.includes(workManagementLink))) {
+    groups.secondary.push(workManagementLink);
   }
 
   // El panel permite a cualquier usuario interno autenticado registrar una

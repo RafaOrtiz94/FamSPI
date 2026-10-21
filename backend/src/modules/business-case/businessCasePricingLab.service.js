@@ -347,7 +347,7 @@ async function loadPricingContext(businessCaseId) {
     ),
     db.query(
       `SELECT item_key, item_id, catalog_id, name, item_type, annual_qty, reference_qty,
-              planned_qty, equipment_id, equipment_name
+              planned_qty, units_per_pack, equipment_id, equipment_name
          FROM bc_consumption_items
         WHERE business_case_id = $1
         ORDER BY COALESCE(equipment_name, ''), item_key`,

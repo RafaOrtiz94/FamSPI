@@ -39,6 +39,7 @@ router.get("/maintenance/list",          requireRole(TI_READ_ROLES), ctrl.listMa
 router.get("/maintenance/diagnose",      requireRole(TI_READ_ROLES), ctrl.diagnoseMaintenance);
 router.get("/reports",                   requireRole(TI_READ_ROLES), ctrl.listReports);
 router.get("/reports/download",          requireRole(TI_READ_ROLES), ctrl.downloadReport);
+router.get("/reports/fti01",             requireRole(TI_READ_ROLES), ctrl.downloadFti01);
 router.get("/reports/asset/:id",         requireRole(TI_READ_ROLES), ctrl.downloadAssetReport);
 router.get("/reports/actas",             requireRole(TI_READ_ROLES), ctrl.downloadActasReport);
 router.get("/reports/collaborator/:userId", requireRole(TI_READ_ROLES), ctrl.downloadCollaboratorReport);
@@ -89,6 +90,7 @@ router.post("/maintenance/:id/request-delivery",     requireRole(TI_ROLES), ctrl
 
 // Reports write
 router.post("/reports/generate", requireRole(TI_ROLES), ctrl.generateReport);
+router.post("/reports/fti01/signature-workflow", requireRole(TI_ROLES), ctrl.startFti01SignatureWorkflow);
 // Publica en Drive los PDF de especificacion tecnica con redaccion guardada. { dry_run?: true, asset_ids?: [] }
 router.post("/tech-specs/publish", requireRole(TI_ROLES), ctrl.publishTechSpecs);
 router.post("/actas/:actaId/start-signature-workflow", requireRole(TI_ROLES), ctrl.startActaSignatureWorkflow);

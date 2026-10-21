@@ -2,6 +2,9 @@ const express = require("express");
 const multer = require("multer");
 const { verifyToken } = require("../../middlewares/auth");
 const controller = require("./workManagement.controller");
+const { ROLE_GROUPS } = require("../../middlewares/roles");
+
+const EXTERNAL_ROLES = new Set((ROLE_GROUPS.ext_users || ["ing_servicio_ext", "esp_app_ext"]).map((role) => String(role).toLowerCase()));
 
 const router = express.Router();
 const upload = multer({
@@ -10,6 +13,14 @@ const upload = multer({
 });
 
 router.use(verifyToken);
+// Abierto a todos los colaboradores; los usuarios externos (ROLE_GROUPS.ext_users) no tienen acceso.
+router.use((req, res, next) => {
+  const roles = [req.user?.role, req.user?.scope].map((value) => String(value || "").trim().toLowerCase());
+  if (roles.some((value) => EXTERNAL_ROLES.has(value))) {
+    return res.status(403).json({ ok: false, message: "Work Management no esta disponible para usuarios externos." });
+  }
+  return next();
+});
 
 router.get("/health", controller.getHealth);
 router.get("/my-work", controller.listMyWork);

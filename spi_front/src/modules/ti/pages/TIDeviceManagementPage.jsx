@@ -79,6 +79,7 @@ import {
   getTiLiberationPhotoFile,
 } from "../../../core/api/tiAssetsApi";
 import TiAssetTechSpecButton from "../components/TiAssetTechSpecButton";
+import TiFti01Actions from "../components/TiFti01Actions";
 
 const STATUS_LABELS = {
   unassigned: "Sin asignar",
@@ -4149,7 +4150,8 @@ const TIDeviceManagementPage = () => {
                 <span className="text-sm font-semibold text-slate-800">Cronograma de mantenimiento</span>
                 <span className="text-xs text-slate-400">({filteredMaintenance.length} de {maintenance.length})</span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <TiFti01Actions year={new Date().getFullYear()} canSign className="flex flex-wrap items-center gap-2" />
                 <Button type="button" variant="primary" icon={FiCalendar} disabled={saving} onClick={generateSchedules}>
                   Generar
                 </Button>

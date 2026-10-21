@@ -1794,6 +1794,35 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
   // directo a bc_consumption_items para que la pantalla de Determinaciones
   // no dependa de que se haya abierto antes el workspace de despacho.
   const plannedUpdatesFromSheet = await pullMaximumQuantitiesFromGoogleSheet({ sheetId, equipmentTabs });
+
+  // Equipos seleccionados sin pestaña en la plantilla base (ej. cobas U 411): se lee su pestaña real
+  // del Sheet del BC (businessCaseSheetLiveTabs.js). Sin esto, lo puesto a mano en esa pestaña no
+  // se sincronizaba nunca.
+  let liveTabItems = [];
+  try {
+    const { readLiveTabsForUnmappedEquipment } = require("./businessCaseSheetLiveTabs");
+    const syncLocalHelpers = require("./businessCaseSheetSyncLocal.service");
+    const liveItems = (await readLiveTabsForUnmappedEquipment({
+      sheetsApi: require("../../config/google").sheets,
+      sheetId,
+      equipmentRecords,
+      mappedEquipmentIds: equipmentTabs.flatMap((tab) => tab?.equipment_ids || []),
+      helpers: syncLocalHelpers,
+      logger,
+    })).filter((item) => (requestedItemTypes?.size ? requestedItemTypes.has(item.item_type) : true));
+    liveTabItems = liveItems;
+    liveItems.forEach((item) => {
+      mergedCatalogItemsForSync.push(item);
+      if (item.annual_qty !== null) sheetUpdatesFromSheet.push({ item_key: item.item_key, annual_qty: item.annual_qty });
+      if (item.planned_qty !== null) plannedUpdatesFromSheet.push({ item_key: item.item_key, planned_qty: item.planned_qty });
+      if (item.item_type === "reactivo" && item.reference_qty !== null) referenceUpdatesFromSheet.push({ item_key: item.item_key, reference_qty: item.reference_qty });
+    });
+  } catch (error) {
+    logger.warn({ businessCaseId, error: error?.message || String(error) }, "[BC_SHEET][LIVE_TAB] No se pudo leer la pestaña en vivo; se sincroniza solo lo de la plantilla");
+  }
+  const saveLivePackSizes = () => require("./businessCaseSheetLiveTabs").savePackSizes(db, businessCaseId, liveTabItems)
+    .catch((error) => logger.warn({ businessCaseId, error: error?.message }, "[BC_SHEET][LIVE_TAB] No se pudo guardar la presentacion (DET/KIT)"));
+  await saveLivePackSizes();
   const currentItems = Array.isArray(current?.items)
     ? current.items.filter((item) => (
       !isObsoleteTemplateFallbackItem(item) &&
@@ -1908,6 +1937,8 @@ async function syncConsumptionQuantitiesFromSheet(businessCaseId, options = {}) 
     consumption_items: nextItems,
     consumption_excluded: current?.excluded || [],
   });
+  // Items recien creados desde la pestaña en vivo: su presentacion se guarda ahora que existen.
+  await saveLivePackSizes();
 
   try {
     await recalculateBusinessCase(businessCaseId);

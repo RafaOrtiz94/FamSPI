@@ -258,6 +258,28 @@ exports.listReports = asyncHandler(async (req, res) => {
   res.json({ ok: true, total: data.length, data });
 });
 
+// F.TI-01 lleno (formato controlado), en PDF.
+exports.downloadFti01 = asyncHandler(async (req, res) => {
+  const { generateFti01Pdf } = require("./tiAssets.fti01");
+  const year = req.query?.year ? Number(req.query.year) : new Date().getFullYear();
+  const { pdfBuffer, filename } = await generateFti01Pdf({ year });
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(pdfBuffer);
+});
+
+// F.TI-01 a firma: { year, prepared_by_user_id, approved_by_user_id }.
+exports.startFti01SignatureWorkflow = asyncHandler(async (req, res) => {
+  const { startFti01SignatureWorkflow } = require("./tiAssets.fti01");
+  const data = await startFti01SignatureWorkflow({
+    year: req.body?.year,
+    preparedByUserId: req.body?.prepared_by_user_id,
+    approvedByUserId: req.body?.approved_by_user_id,
+    actorUser: req.user,
+  });
+  res.status(201).json({ ok: true, data });
+});
+
 exports.downloadReport = asyncHandler(async (req, res) => {
   const periodType = String(req.query?.period_type || "annual").toLowerCase() === "monthly" ? "monthly" : "annual";
   const year = req.query?.year ? Number(req.query.year) : new Date().getFullYear();

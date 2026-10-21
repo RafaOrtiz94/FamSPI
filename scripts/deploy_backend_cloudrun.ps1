@@ -93,6 +93,78 @@ function Show-CloudRunFailureDiagnostics {
   }
 }
 
+function Assert-NotificationDispatchScheduler {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectId,
+    [Parameter(Mandatory = $true)]
+    [string]$Region,
+    [Parameter(Mandatory = $true)]
+    [string]$ServiceName
+  )
+
+  $jobName = "notification-dispatch-queue"
+  $expectedPath = "/internal/jobs/notifications/dispatch"
+
+  $schedulerJson = @(& gcloud scheduler jobs describe $jobName `
+    --project $ProjectId `
+    --location $Region `
+    --format json)
+  if ($LASTEXITCODE -ne 0) {
+    throw "No se pudo consultar Cloud Scheduler: $jobName"
+  }
+
+  try {
+    $scheduler = ($schedulerJson -join "`n") | ConvertFrom-Json
+  }
+  catch {
+    throw "Cloud Scheduler devolvio una respuesta invalida para $jobName"
+  }
+
+  if ([string]$scheduler.state -ne "ENABLED") {
+    throw "El scheduler $jobName no esta habilitado (estado: $($scheduler.state))."
+  }
+
+  $targetUriText = [string]$scheduler.httpTarget.uri
+  try {
+    $targetUri = [Uri]$targetUriText
+  }
+  catch {
+    throw "El scheduler $jobName tiene una URI invalida."
+  }
+
+  if ($targetUri.Scheme -ne "https" -or $targetUri.AbsolutePath.TrimEnd("/") -ne $expectedPath) {
+    throw "El scheduler $jobName no apunta al endpoint esperado $expectedPath."
+  }
+  if (-not $targetUri.Host.StartsWith("$ServiceName-", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "El scheduler $jobName no apunta al servicio Cloud Run $ServiceName."
+  }
+  if ([string]$scheduler.httpTarget.httpMethod -ne "POST") {
+    throw "El scheduler $jobName debe invocar el endpoint con metodo POST."
+  }
+
+  $schedulerJobsKey = [string]$scheduler.httpTarget.headers.'x-jobs-key'
+  if ([string]::IsNullOrWhiteSpace($schedulerJobsKey)) {
+    throw "El scheduler $jobName no tiene configurado el header x-jobs-key."
+  }
+
+  $latestJobsKeyOutput = @(& gcloud secrets versions access latest `
+    --secret JOBS_KEY `
+    --project $ProjectId)
+  if ($LASTEXITCODE -ne 0) {
+    throw "No se pudo leer JOBS_KEY desde Secret Manager."
+  }
+  $latestJobsKey = ($latestJobsKeyOutput -join "`n").Trim()
+  if ([string]::IsNullOrWhiteSpace($latestJobsKey)) {
+    throw "JOBS_KEY esta vacio en Secret Manager."
+  }
+  if ($schedulerJobsKey -cne $latestJobsKey) {
+    throw "El scheduler $jobName usa un JOBS_KEY distinto al latest de Secret Manager."
+  }
+
+  Write-Host "Scheduler verificado: $jobName [ENABLED, POST, endpoint y JOBS_KEY correctos]"
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendPath = Join-Path $repoRoot "backend"
 $image = "us-central1-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/${ServiceName}:${ImageTag}"
@@ -137,7 +209,7 @@ try {
     "--max-instances", "3",               # 3 instancias x 8 conexiones = 24 max al pooler Neon
     "--concurrency", "50",                # Máx 50 requests simultáneos por instancia — suficiente para ~40 usuarios de evento
     "--set-env-vars", "NODE_ENV=production",
-    "--set-env-vars", "ENABLE_JOBS=false",   # Jobs internos deshabilitados; los Cloud Scheduler externos permanecen pausados desde el corte 2026-09-28 para permitir autosuspend de Neon.
+    "--set-env-vars", "ENABLE_JOBS=false",   # Jobs internos deshabilitados: produccion depende de Cloud Scheduler; el job de notificaciones se valida al finalizar el deploy.
     "--set-env-vars", "JOBS_RUN_ON_START=false",
     "--set-env-vars", "JOBS_BOOTSTRAP_STAGGER_MS=20000",
     "--set-env-vars", "DB_POOL_MAX=8",    # 3 instancias x 8 = 24 conexiones al pooler Neon (evento Kick Off ~40 usuarios)
@@ -258,6 +330,9 @@ try {
   if ($PrintOnly) {
     Write-Host "gcloud (ambiente: $Environment, servicio: $ServiceName)"
     $deployArgs | ForEach-Object { Write-Host "  $_" }
+    if ($Environment -eq "production" -and $ServiceName -eq "spi-backend") {
+      Write-Host "Post-deploy: verificar Cloud Scheduler notification-dispatch-queue."
+    }
     return
   }
 
@@ -276,6 +351,14 @@ try {
     --format "value(status.latestReadyRevisionName,status.url)"
   if ($LASTEXITCODE -ne 0) {
     throw "No se pudo describir el servicio desplegado"
+  }
+
+  if ($Environment -eq "production" -and $ServiceName -eq "spi-backend") {
+    Write-Step "Verificando scheduler de notificaciones" 95
+    Assert-NotificationDispatchScheduler `
+      -ProjectId $ProjectId `
+      -Region $Region `
+      -ServiceName $ServiceName
   }
 
   Write-Step "Completado" 100

@@ -19,7 +19,7 @@ const validations = require("./consumableRuleValidations.service");
 const calibrationService = require("./consumableCalibration.service");
 
 // Cambiarla vuelve a simular todo: subirla cuando cambien reglas, variables o el modelo.
-const ENGINE_VERSION = "2026-10-16.1";
+const ENGINE_VERSION = "2026-10-19.1";
 // Con escenarios calibrados contra procesos reales se predice con mas escenarios (el numero no
 // limita: corre en otro hilo).
 const AUTO_SCENARIOS = 20000;
@@ -32,7 +32,7 @@ const STATISTICS_SQL = `
   SELECT r.business_case_id,
          md5(concat_ws('|',
            r.projected_deadline_months,
-           (SELECT string_agg(concat_ws(':', c.equipment_id, LOWER(c.item_type), COALESCE(c.item_id, c.catalog_id::text), c.annual_qty, c.planned_qty), ','
+           (SELECT string_agg(concat_ws(':', c.equipment_id, LOWER(c.item_type), COALESCE(c.item_id, c.catalog_id::text), c.annual_qty, c.planned_qty, c.units_per_pack), ','
                               ORDER BY c.equipment_id, LOWER(c.item_type), c.item_id, c.catalog_id)
               FROM bc_consumption_items c WHERE c.business_case_id = r.business_case_id),
            (SELECT concat_ws(':', e.work_days_per_week, e.shifts_per_day, e.hours_per_shift, e.quality_controls_per_shift, e.control_levels)

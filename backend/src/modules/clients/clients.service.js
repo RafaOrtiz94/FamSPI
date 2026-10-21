@@ -1569,7 +1569,17 @@ async function listAccessibleClients({
       crm_followup.activity_id AS crm_activity_id,
       crm_followup.activity_status AS crm_activity_status,
       crm_followup.followup_status AS crm_followup_status
-    FROM client_requests cr
+    -- Primero la pagina (filtros, orden, limite) y despues los LATERAL: asi solo se calculan para las
+    -- filas que se devuelven. Antes se calculaban para todos los clientes (1 713 recorridos completos de
+    -- crm_activities por llamada; ~0,8 s y la mayor carga de CPU de Neon, 2026-10-20).
+    FROM (
+      SELECT cr.*
+      FROM client_requests cr
+      ${whereClause}
+      ORDER BY cr.created_at DESC
+      LIMIT ${safeLimit + 1}
+      OFFSET ${safeOffset}
+    ) cr
     LEFT JOIN LATERAL (
       SELECT
         COALESCE(
@@ -1696,23 +1706,26 @@ async function listAccessibleClients({
       FROM crm.crm_activities a
       WHERE a.deleted_at IS NULL
         AND a.activity_type = 'visita'
-        AND (
-          (vl.id IS NOT NULL AND a.visit_log_id = vl.id)
-          OR EXISTS (
-            SELECT 1
-            FROM scheduled_visits sv2
-            JOIN visit_schedules vs2 ON vs2.id = sv2.schedule_id
-            WHERE sv2.crm_activity_id = a.id
-              AND sv2.client_request_id = cr.id
-              AND LOWER(COALESCE(vs2.user_email, '')) = LOWER($1)
-              AND (
-                sv2.planned_date = $2
-                OR (
-                  vs2.month = EXTRACT(MONTH FROM $2::date)
-                  AND vs2.year = EXTRACT(YEAR FROM $2::date)
-                )
+        -- IN (... UNION ...) en vez de OR: cada rama usa su indice (visit_log_id / pkey) en lugar de
+        -- recorrer toda la tabla por cliente.
+        AND a.id IN (
+          SELECT a_log.id
+          FROM crm.crm_activities a_log
+          WHERE vl.id IS NOT NULL AND a_log.visit_log_id = vl.id
+          UNION
+          SELECT sv2.crm_activity_id
+          FROM scheduled_visits sv2
+          JOIN visit_schedules vs2 ON vs2.id = sv2.schedule_id
+          WHERE sv2.crm_activity_id IS NOT NULL
+            AND sv2.client_request_id = cr.id
+            AND LOWER(COALESCE(vs2.user_email, '')) = LOWER($1)
+            AND (
+              sv2.planned_date = $2
+              OR (
+                vs2.month = EXTRACT(MONTH FROM $2::date)
+                AND vs2.year = EXTRACT(YEAR FROM $2::date)
               )
-          )
+            )
         )
       ORDER BY
         CASE
@@ -1723,10 +1736,7 @@ async function listAccessibleClients({
         a.updated_at DESC
       LIMIT 1
     ) crm_followup ON TRUE
-    ${whereClause}
     ORDER BY cr.created_at DESC
-    LIMIT ${safeLimit + 1}
-    OFFSET ${safeOffset}
   `;
 
   const { rows: rawRows } = await db.query(query, params);

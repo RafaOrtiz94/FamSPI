@@ -9,8 +9,6 @@ import { promptDialog } from "../../../../core/ui/utils/promptDialog";
 import { formatDateTimeSafe } from "../../../../shared/utils/dateUtils";
 import SectionEditorBadge from "./SectionEditorBadge";
 import {
- DeliveryHistoryPanel,
- LabStatisticsPanel,
  PREDICTION_VALIDATOR_ROLES,
  PredictionCell,
  PredictionChangeModal,
@@ -18,8 +16,6 @@ import {
  SheetDifferenceModal,
  predictionKey,
  useDeterminationPredictions,
- useDeliveryHistory,
- useLabStatistics,
 } from "./DeterminationPredictions";
 import {
  getDeterminationsStatDocumentInfo,
@@ -434,9 +430,6 @@ const DeterminationsSection = ({
  // Prediccion del motor para calibradores, controles y materiales (los reactivos vienen de
  // DET/AÑO/PROCESO del Sheet). Jefe de Servicio la valida o la cambia explicando el motivo.
  const predictions = useDeterminationPredictions(bcId);
- const labStatistics = useLabStatistics(bcId);
- const deliveryHistory = useDeliveryHistory(bcId);
- const labStatisticsPending = labStatistics.missingRequired.length > 0;
  const canValidatePredictions = PREDICTION_VALIDATOR_ROLES.has(normalizedCurrentRole);
  const [predictionToChange, setPredictionToChange] = useState(null);
  const [predictionToJustify, setPredictionToJustify] = useState(null);
@@ -1334,18 +1327,6 @@ const handleResolveUnlockSubsection = async (requestEntry, approve) => {
  </div>
  </div>
 
- <DeliveryHistoryPanel
-  history={deliveryHistory.data}
-  canUpload={canValidatePredictions}
-  onUpload={async (file) => { await deliveryHistory.upload(file); predictions.reload(); }}
- />
-
- <LabStatisticsPanel
-  statistics={labStatistics.data}
-  canEdit={canValidatePredictions}
-  onSave={async (values) => { await labStatistics.save(values); predictions.reload(); }}
- />
-
  <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 space-y-3">
  <div className="flex flex-col gap-1">
  <h3 className="text-sm font-semibold text-gray-900">Documento estadistico para determinaciones</h3>
@@ -1859,7 +1840,7 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
   <td className="py-3 px-4 align-top">
    <PredictionCell
     prediction={predictionForRow(row, section.key)}
-    canValidate={canValidatePredictions && !labStatisticsPending}
+    canValidate={canValidatePredictions}
     busy={predictionBusy}
     onValidate={(prediction) => validatePredictionItems([{
      equipmentId: prediction.equipmentId, itemType: prediction.itemType, supplierCode: prediction.supplierCode,
@@ -1889,11 +1870,10 @@ className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] fo
    <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-gray-100 bg-emerald-50/40">
     <span className="text-xs text-gray-600">
      {pending.length} predicción(es) del motor sin validar en {section.title.toLowerCase()}.
-     {labStatisticsPending && " Complete primero las estadísticas del laboratorio."}
     </span>
     <button
      type="button"
-     disabled={predictionBusy || labStatisticsPending}
+     disabled={predictionBusy}
      onClick={() => validatePredictionItems(
       pending.map((prediction) => ({ equipmentId: prediction.equipmentId, itemType: prediction.itemType, supplierCode: prediction.supplierCode })),
       `${pending.length} predicción(es) validada(s).`,

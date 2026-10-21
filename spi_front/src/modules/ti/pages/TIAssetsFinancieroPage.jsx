@@ -35,6 +35,7 @@ import {
   uploadTiFinancialDoc,
 } from "../../../core/api/tiAssetsApi";
 import TiAssetTechSpecButton from "../components/TiAssetTechSpecButton";
+import TiFti01Actions from "../components/TiFti01Actions";
 
 const EMPTY_FORM = {
   name: "", brand: "", model: "", serial_number: "", imei: "",
@@ -1121,6 +1122,7 @@ const TIAssetsFinancieroPage = () => {
             >
               <FiDownload size={13} /> Descargar PDF
             </button>
+            <TiFti01Actions year={reportYear} className="flex flex-col gap-2 [&>button]:w-full" />
           </div>
 
           {/* Actas de entrega-recepcion */}

@@ -451,6 +451,10 @@ Posición: columna `right-4`, por encima de `NotificationBell.jsx` y `Attendance
 
 ---
 
+### Sincronizacion de equipos sin pestaña en la plantilla (2026-10-19)
+
+`syncConsumptionQuantitiesFromSheet` identifica las filas por la plantilla base (`TABLA BASE BC.xlsx`, por numero de fila) y por `catalog_equipment_consumables`. Un equipo sin pestaña en la plantilla (ej. cobas U 411, equipo 19: la plantilla solo tiene u6500 para orina) no sincronizaba nada de lo puesto a mano en su pestaña del Sheet. Ahora `businessCaseSheetLiveTabs.js` lee en vivo la pestaña real del BC para esos equipos: empareja la pestaña por nombre (mismo puntaje de alias que `buildSheetPayloads`), ubica la fila de encabezados (I.D / DET/AÑO / PRODUCTO A ENVIAR), toma cada fila con codigo y saca el tipo de la seccion o del nombre ("Calibration strip" = calibrador, "Control-Test" = control). Claves `sheet:<equipo>:<codigo>:<tipo>` (las mismas de la plantilla: no duplica). Si Google falla, se registra y se sincroniza solo lo de la plantilla. Caso de origen: BC dbe65add (Damas del Cuerpo Consular).
+
 ## 12. Motor versionado de matrices de costos (2026-09)
 
 El motor declarativo de matrices vive en `matrixCalculationEngine.service.js`. No ejecuta
@@ -712,3 +716,36 @@ familias y equipos**, pero continúa visible únicamente para
   (Histolab: 170 productos) y XP300 (4 productos), sin errores SQL ni de
   serialización. Todos quedaron `no_rule` porque aún no hay adaptadores
   registrados.
+
+### Flujo de prediccion de un Business Case (2026-10-19)
+
+Calibradores, controles y materiales. Los reactivos no se predicen: salen de DET/AÑO/PROCESO del Sheet.
+Por producto se usa la primera fuente que tenga dato (`consumableRules.service.js#buildSimulationModel`
++ `consumableSimulation.service.js#predictFromHistory`):
+
+| # | Fuente (`basis`) | De donde sale | Precision |
+|---|---|---|---|
+| 1 | `client_history` | Entregas reales del proceso anterior del mismo cliente (`bc_delivery_history`) | La mejor |
+| 2 | `equipment_manual` | Intervalos del manual (ISE, lampara, electrodos) | Alta |
+| 3 | `reference_same_code` / `reference_same_name` | Consumo real de otros clientes (`bc_reference_consumption`, historial de otros BC) | Media |
+| 4 | `reference_expert` | Lo que jefe_servicio justifico en otros procesos del mismo equipo (`bc_knowledge_matrix`) | Media |
+| 5 | `reference_family_median` | Mediana de su familia, **solo entre equipos de la misma categoria** (las referencias son chemistry / immunology / configuracion = cobas pro). Orina, hematologia, coagulacion, etc. no la heredan | Baja |
+| 6 | `calibrated_scenarios` / `simulation_p50` | Simulacion con la ficha tecnica (`catalog_consumable_specs`) | Baja-media |
+| 7 | `qc_calendar` | **Equipo con pocas variables** (sin ficha, sin historial, sin referencia): `qcCalendarRule.js` con el entorno del BC (`bc_lab_environment`) y la presentacion DET/KIT del Sheet (`bc_consumption_items.units_per_pack`) | Estimacion |
+
+Despues, `determinationPredictions.service.js` reparte por entregas parciales (`bc_deliveries.partial_deliveries`)
+y suma lo aprendido de jefe_servicio (analizadores, extra por entrega).
+
+`qc_calendar`: control = dias/semana × semanas × turnos × controles por turno × niveles ÷ DET/KIT;
+calibrador = una calibracion cada 7 dias del proceso ÷ DET/KIT. Sin DET/KIT o sin entorno no predice.
+Caso real: cobas U 411 (BC dbe65add) — control 25, calibrador 5 (el especialista puso 6 y 1); la
+diferencia la justifica jefe_servicio y su justificacion pasa a ser la referencia del proximo U 411.
+
+**Que hace mas precisa la prediccion (de mayor a menor impacto)**: el control de consumibles entregados
+del proceso anterior del cliente; las justificaciones de jefe_servicio (cada BC validado alimenta al
+siguiente del mismo equipo); las entregas parciales llenas; el entorno del laboratorio (dias, turnos,
+controles, niveles); la ficha tecnica del producto.
+
+`units_per_pack` (migracion 336) la escribe solo la sincronizacion del Sheet (pestañas en vivo, por ahora);
+el guardado de consumos desde la UI no la toca. La huella de la simulacion la incluye y `ENGINE_VERSION`
+subio a `2026-10-19.1` para recalcular las predicciones guardadas.

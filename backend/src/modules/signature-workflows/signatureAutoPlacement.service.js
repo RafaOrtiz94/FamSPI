@@ -236,4 +236,4 @@ async function detectPlacementsForDocument(pdfBytes, signers) {
   return results;
 }
 
-module.exports = { detectSignerPlacement, detectPlacementsForDocument, normalizeTokens };
+module.exports = { detectSignerPlacement, detectPlacementsForDocument, normalizeTokens, extractPages };

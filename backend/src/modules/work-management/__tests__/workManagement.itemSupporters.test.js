@@ -59,6 +59,9 @@ describe("addItemSupporter", () => {
       if (sql.startsWith("BEGIN") || sql.startsWith("COMMIT") || sql.startsWith("ROLLBACK")) {
         return Promise.resolve();
       }
+      if (sql.includes("SELECT context FROM work_management.followers")) {
+        return Promise.resolve({ rows: [] });
+      }
       if (sql.includes("INSERT INTO work_management.followers")) {
         return Promise.resolve({ rows: [{ inserted: true }] });
       }
@@ -101,6 +104,8 @@ describe("addItemSupporter", () => {
       expect.objectContaining({
         userId: SUPPORTER_ID,
         source: "work_management.item.supporter_assigned",
+        email: true,
+        ignoreEmailSchedule: true,
         customMessage: expect.stringContaining("Revisar el anexo tecnico antes del viernes"),
         meta: expect.objectContaining({
           target_path: `/dashboard/work-management/projects/${PROJECT_ID}`,
@@ -110,34 +115,44 @@ describe("addItemSupporter", () => {
     );
   });
 
-  it("si ya era apoyo (ON CONFLICT actualiza), no re-enrola ni re-notifica", async () => {
+  const existingSupporterClient = (previousContext) => jest.fn((sql) => {
+    if (sql.startsWith("BEGIN") || sql.startsWith("COMMIT") || sql.startsWith("ROLLBACK")) return Promise.resolve();
+    if (sql.includes("SELECT context FROM work_management.followers")) return Promise.resolve({ rows: [{ context: previousContext }] });
+    if (sql.includes("INSERT INTO work_management.followers")) return Promise.resolve({ rows: [{ inserted: false }] });
+    if (sql.includes("INSERT INTO work_management.work_activity_log")) return Promise.resolve();
+    throw new Error(`client.query no mockeada: ${sql}`);
+  });
+
+  it("si ya era apoyo con el mismo contexto, no re-enrola ni re-notifica", async () => {
     baseAccessMocks();
-    const clientQuery = jest.fn((sql) => {
-      if (sql.startsWith("BEGIN") || sql.startsWith("COMMIT") || sql.startsWith("ROLLBACK")) {
-        return Promise.resolve();
-      }
-      if (sql.includes("INSERT INTO work_management.followers")) {
-        return Promise.resolve({ rows: [{ inserted: false }] });
-      }
-      if (sql.includes("INSERT INTO work_management.work_activity_log")) {
-        return Promise.resolve();
-      }
-      throw new Error(`client.query no mockeada: ${sql}`);
-    });
+    const clientQuery = existingSupporterClient("Contexto actual");
     db.getClient.mockResolvedValue({ query: clientQuery, release: jest.fn() });
 
-    const result = await addItemSupporter(
-      ITEM_ID,
-      { supporter_user_id: SUPPORTER_ID, context: "Contexto actualizado" },
-      ACTOR_USER_ID
-    );
+    const result = await addItemSupporter(ITEM_ID, { supporter_user_id: SUPPORTER_ID, context: "Contexto actual" }, ACTOR_USER_ID);
 
-    expect(result).toMatchObject({ is_new: false });
-    expect(clientQuery).not.toHaveBeenCalledWith(
-      expect.stringContaining("INSERT INTO work_management.workspace_members"),
-      expect.anything()
-    );
+    expect(result).toMatchObject({ is_new: false, context_changed: false });
+    expect(clientQuery).not.toHaveBeenCalledWith(expect.stringContaining("INSERT INTO work_management.workspace_members"), expect.anything());
     expect(notificationManager.sendNotification).not.toHaveBeenCalled();
+  });
+
+  it("si ya era apoyo y se le asigna con otro contexto, se le avisa por correo", async () => {
+    baseAccessMocks();
+    const base = db.query.getMockImplementation();
+    db.query.mockImplementation((sql, params) => (sql.includes("SELECT id, name FROM work_management.projects")
+      ? Promise.resolve({ rows: [{ id: PROJECT_ID, name: "Implementacion CRM" }] })
+      : base(sql, params)));
+    db.getClient.mockResolvedValue({ query: existingSupporterClient("Contexto anterior"), release: jest.fn() });
+
+    const result = await addItemSupporter(ITEM_ID, { supporter_user_id: SUPPORTER_ID, context: "Revisar la nueva version" }, ACTOR_USER_ID);
+
+    expect(result).toMatchObject({ is_new: false, context_changed: true });
+    expect(notificationManager.sendNotification).toHaveBeenCalledWith(expect.objectContaining({
+      userId: SUPPORTER_ID,
+      customTitle: "Se actualizo tu apoyo",
+      email: true,
+      ignoreEmailSchedule: true,
+      customMessage: expect.stringContaining("Revisar la nueva version"),
+    }));
   });
 });
 
