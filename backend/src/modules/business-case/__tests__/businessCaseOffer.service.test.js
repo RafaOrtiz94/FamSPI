@@ -1000,6 +1000,48 @@ describe("businessCaseOffer.service", () => {
     expect(templatePayload.sections.control).toBeUndefined();
   });
 
+  test("cobas Pure <303>: controles y calibradores siguen el orden de la tabla base, no el del catalogo", async () => {
+    // Codigos reales de la pestana "c303 c503", entregados en orden de catalogo (source_order).
+    const pure = { equipment_id: 9, equipment_name: "cobas Pure <303>", source: "catalog" };
+    const templatePayload = await service.__testables.buildOfferTemplatePayload(
+      { client_name: "Cliente Demo", bc_purchase_type: "public" },
+      [
+        { ...pure, item_key: "cons:9:15", item_id: "5479207190", code: "5479207190", name: "PreciControl HBA1c Norm", item_type: "control", source_order: 0 },
+        { ...pure, item_key: "cons:9:280", item_id: "10759350190", code: "10759350190", name: "Calibrator f.a.s.", item_type: "calibrador", source_order: 16 },
+        { ...pure, item_key: "cons:9:286", item_id: "4528417190", code: "4528417190", name: "Cfas HbA1c", item_type: "calibrador", source_order: 21 },
+        { ...pure, item_key: "cons:9:305", item_id: "3121313122", code: "3121313122", name: "PRECINORM PUC", item_type: "control", source_order: 38 },
+      ],
+      { email: "test@demo.com" },
+    );
+
+    expect(templatePayload.sections.control_calibrador.map((row) => row.code)).toEqual([
+      "10759350190", // fila 84
+      "3121313122", // fila 85
+      "4528417190", // fila 100
+      "5479207190", // fila 101
+    ]);
+  });
+
+  test("cobas Pure <303>: variante sin codigo se ubica por nombre y una fila de encabezado no roba productos", async () => {
+    const pure = { equipment_id: 9, equipment_name: "cobas Pure <303>", source: "catalog" };
+    const ordered = service.__testables.orderOfferItemsByBusinessCaseTemplate([
+      { ...pure, item_key: "cons:9:636", item_id: "20763071122", name: "ISE DEPROTEINIZER cobas integra (6x21ML)", item_type: "material", source_order: 0 },
+      { ...pure, item_key: "cons:9:324", item_id: "11183974216", name: "ISE Standard low 10x3ML", item_type: "material", source_order: 1 },
+      { ...pure, item_key: "cons:9:803", item_id: null, name: "ECO-D, 40T, cobas c pack green c503", item_type: "material", source_order: 2 },
+      { ...pure, item_key: "cons:9:625", item_id: "8063451190", name: "NaOH-D, cobas c pack green c303", item_type: "material", source_order: 3 },
+      { ...pure, item_key: "cons:9:624", item_id: "8063354190", name: "ECO-D, 40T, cobas c pack green c303", item_type: "material", source_order: 4 },
+    ]);
+
+    // Filas 128 (c303), 129 (c503), 130, 153 y 157: la fila 152 (encabezado sin codigo) se ignora.
+    expect(ordered.map((item) => item.item_key)).toEqual([
+      "cons:9:624",
+      "cons:9:803",
+      "cons:9:625",
+      "cons:9:324",
+      "cons:9:636",
+    ]);
+  });
+
   test("separa calibradores y controles para cobas e411 disk", async () => {
     const templatePayload = await service.__testables.buildOfferTemplatePayload(
       { client_name: "Cliente Demo", bc_purchase_type: "public" },

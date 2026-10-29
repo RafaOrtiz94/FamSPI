@@ -200,10 +200,14 @@ function toNullableNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// Misma regla que las etiquetas de la tabla base (normalizeText en
+// businessCaseSheetSyncLocal): puntuacion -> espacio. Sin esto "ECO-D, 40T, ..."
+// nunca coincide con la fila "eco d 40t ..." y el item cae al final de la oferta.
 function normalizeOfferText(value) {
   return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
     .trim()
     .toLowerCase();
 }
@@ -289,27 +293,34 @@ function buildOfferItemTemplateOrder(items = []) {
     const rowId = normalizeOfferProductId(row?.itemId);
     const rowLabel = normalizeOfferText(row?.label);
     const rowType = String(row?.itemType || "").trim().toLowerCase();
-    const eligibleItems = tabItems.filter((candidate) => {
+    // Fila sin codigo ni tipo = encabezado/residuo de la plantilla (ej. fila 152
+    // de "c303 c503" repite el texto del ISE Deproteinizer de la fila 157): no es producto.
+    if (!rowId && !rowType) return null;
+    const availableItems = tabItems.filter((candidate) => {
       const itemKey = String(candidate?.item_key || "");
-      if (!itemKey || consumedKeys.has(itemKey)) return false;
-      const candidateType = String(candidate?.item_type || "").trim().toLowerCase();
-      if (rowType && candidateType && rowType !== candidateType) return false;
-      return true;
+      return Boolean(itemKey) && !consumedKeys.has(itemKey);
     });
 
     // El codigo de la hoja es la identidad del producto. Buscar por nombre
     // antes de revisar todos los codigos puede asociar una fila "Glucosa" a
     // otro SKU y dejar el SKU real como una segunda fila duplicada.
+    // Sin filtrar por tipo: las pestanas sin encabezados de seccion (XN-L,
+    // XN 1000, XP 300, b123) tipan todo como "reactivo" y el catalogo trae
+    // control/material para el mismo codigo.
     if (rowId) {
-      const exactIdMatch = eligibleItems.find(
+      const exactIdMatch = availableItems.find(
         (candidate) => normalizeOfferProductId(candidate?.item_id) === rowId,
       );
       if (exactIdMatch) return exactIdMatch;
     }
 
-    return eligibleItems.find(
-      (candidate) => rowLabel && normalizeOfferText(candidate?.name) === rowLabel,
-    ) || null;
+    // Por nombre si se exige el mismo tipo. tab.items son los sync_items de
+    // buildSheetPayloads: el nombre viaja en item_name.
+    return availableItems.find((candidate) => {
+      const candidateType = String(candidate?.item_type || "").trim().toLowerCase();
+      if (rowType && candidateType && rowType !== candidateType) return false;
+      return rowLabel && normalizeOfferText(candidate?.item_name ?? candidate?.name) === rowLabel;
+    }) || null;
   };
 
   equipmentTabs.forEach((tab) => {
@@ -405,6 +416,16 @@ function orderOfferItemsByBusinessCaseTemplate(items = []) {
       && matchedTemplateFamilies.has(familySignature)
     );
   });
+
+  // Un item visible sin fila en la tabla base cae al final de su seccion y ya
+  // no sigue el orden del Sheet del BC: se avisa para corregir catalogo/plantilla.
+  const unmatchedVisible = visibleItems.filter((item) => !matchedItemKeys.has(String(item?.item_key || "")));
+  if (unmatchedVisible.length) {
+    logger.warn(
+      { items: unmatchedVisible.map((item) => ({ item_key: item.item_key, item_id: item.item_id || null, name: item.name, equipment: item.equipment_name })) },
+      "[BC_OFFER_ORDER] Items sin fila en la tabla base: se ubican al final de la oferta",
+    );
+  }
 
   return visibleItems.sort((left, right) => {
     const leftKey = String(left?.item_key || "");
@@ -1082,9 +1103,13 @@ async function buildOfferTemplatePayload(context, items, user) {
 
   // La tabla base del cobas Pure <303> usa un unico bloque. Los demas
   // equipos mantienen ambos tipos como secciones independientes.
+  // El bloque combinado sigue el orden de filas de la tabla base (orderedItems),
+  // no sourceOrder: ese es el orden de BD/catalogo y descuadra los precios
+  // contra el Sheet del BC.
   if (isCombinedControlCalibratorEquipment(orderedItems)) {
+    const templatePosition = new Map(orderedItems.map((item, index) => [item.item_key || null, index]));
     grouped.control_calibrador = [...grouped.calibrador, ...grouped.control]
-      .sort((left, right) => Number(left?.sourceOrder ?? 0) - Number(right?.sourceOrder ?? 0));
+      .sort((left, right) => (templatePosition.get(left.itemKey) ?? 0) - (templatePosition.get(right.itemKey) ?? 0));
     delete grouped.calibrador;
     delete grouped.control;
   }
@@ -3030,6 +3055,9 @@ async function createOfferDraftForContext(context, user, target = null) {
   });
   await syncOfferSheetItemIdentity(imported.sheetFileId, templatePayload);
 
+  // Dos solicitudes simultaneas (doble clic) calculan el mismo version_number:
+  // la que pierde choca con el indice unico. Se responde 409 y se manda a la
+  // papelera la hoja que ya se habia creado en Drive.
   const { rows } = await db.query(
     `INSERT INTO bc_offer_versions (
        business_case_id, private_purchase_id, offer_key, offer_label, target_equipment_id, target_equipment_name,
@@ -3059,7 +3087,16 @@ async function createOfferDraftForContext(context, user, target = null) {
       }),
       Number(user?.id) || null,
     ],
-  );
+  ).catch(async (error) => {
+    if (error?.code !== "23505") throw error;
+    await drive.files
+      .update({ fileId: imported.sheetFileId, supportsAllDrives: true, requestBody: { trashed: true } })
+      .catch((trashError) => logger.warn({ sheetFileId: imported.sheetFileId, error: trashError?.message }, "No se pudo enviar a la papelera la hoja de oferta duplicada"));
+    const conflict = new Error("Ya se esta creando una oferta para este Business Case. Recargue la pagina.");
+    conflict.status = 409;
+    conflict.code = "BC_OFFER_ACTIVE_VERSION_EXISTS";
+    throw conflict;
+  });
 
   if (context?.source_type !== "private_purchase") {
     await recordDocumentVersion({

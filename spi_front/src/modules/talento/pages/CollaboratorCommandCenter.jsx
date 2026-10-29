@@ -21,6 +21,7 @@ import {
 } from "../components/collaboratorProfileDefinitions";
 import ApplicantIntakeSummary from "../components/workspace/ApplicantIntakeSummary";
 import PipelineWorkspace from "../components/pipeline/PipelineWorkspace";
+import OrphanApplicantsPanel from "../components/pipeline/OrphanApplicantsPanel";
 import PersonnelRequestComments from "../components/workspace/PersonnelRequestComments";
 import PersonnelRequestProgress from "../components/workspace/PersonnelRequestProgress";
 import WorkspaceErrorBoundary from "../components/workspace/WorkspaceErrorBoundary";
@@ -1175,6 +1176,9 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
         </div>
       )}
       {!currentEntity && <WorkspaceEmptyState onOpen={() => setBrowserOpen(true)} currentView={currentView} />}
+      {browserView === "requests" && ["talento_humano", "gerencia", "gerencia_general", "admin"].includes(String(currentUserRole || "").toLowerCase()) && (
+        <OrphanApplicantsPanel requests={asArray(requests)} onLinked={refetchApplicants} />
+      )}
 
       {workspaceAccess.scope === "full" && (
         <div className="mb-5">

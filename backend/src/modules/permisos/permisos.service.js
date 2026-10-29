@@ -3327,7 +3327,7 @@ async function createSolicitud({ body, user, files = [], meta }) {
     logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo enviar notificaci?n de solicitud");
   }
 
-  // Notificar a Talento Humano (visibilidad, sin email para no saturar)
+  // Notificar a Talento Humano por correo e internamente para que pueda dar seguimiento.
   try {
     const thUsers = await findTalentoHumanoUsers();
     for (const thUser of thUsers) {
@@ -3342,7 +3342,7 @@ async function createSolicitud({ body, user, files = [], meta }) {
         type: "info",
         source: "permisos_vacaciones",
         priority: 0,
-        email: false,
+        email: true,
         meta: {
           solicitud_id: rows[0].id,
           tipo_solicitud: payload.tipo_solicitud,
@@ -5842,6 +5842,8 @@ async function listarResumenColaboradores({ departmentId = null, year = null, em
           null,
         documento_url: row.pdf_generado_url || null,
         pdf_validacion_legal_url: row.pdf_validacion_legal_url || null,
+        justificantes_urls: row.justificantes_urls,
+        external_coordination_urls: row.external_coordination_urls,
       });
       return;
     }
@@ -5871,6 +5873,7 @@ async function listarResumenColaboradores({ departmentId = null, year = null, em
       charged_vacation_days: row.charged_vacation_days,
       justificacion_requerida: row.justificacion_requerida,
       justificantes_urls: row.justificantes_urls,
+      external_coordination_urls: row.external_coordination_urls,
       es_emergencia: Boolean(row.es_emergencia),
       created_at: row.created_at,
       // Trazabilidad: solicitante (dueño), aprobación parcial, final/rechazo y cancelación

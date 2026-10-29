@@ -1279,6 +1279,44 @@ const getApplicantById = async (id) => {
   };
 };
 
+// Postulantes que el cargo del formulario no pudo vincular a ninguna solicitud
+// (resolvePersonnelRequestIdByCargo exige coincidencia exacta normalizada).
+const listOrphanApplicants = async () => {
+  await ensureApplicantsTables();
+  const { rows } = await db.query(
+    `SELECT id, fullname, email, status, created_at,
+            NULLIF(TRIM(profile->'laboral'->>'cargo'), '') AS cargo
+       FROM applicants
+      WHERE personnel_request_id IS NULL
+        AND (status IS NULL OR status <> 'hired')
+      ORDER BY cargo NULLS LAST, created_at DESC`
+  );
+  return rows;
+};
+
+const linkApplicantToRequest = async (applicantId, requestId) => {
+  await ensureApplicantsTables();
+  if (requestId) {
+    const { rowCount } = await db.query("SELECT 1 FROM personnel_requests WHERE id = $1", [requestId]);
+    if (!rowCount) {
+      const err = new Error("Solicitud no encontrada");
+      err.status = 404;
+      throw err;
+    }
+  }
+  const { rows } = await db.query(
+    `UPDATE applicants SET personnel_request_id = $2, updated_at = NOW()
+      WHERE id = $1 RETURNING id, personnel_request_id`,
+    [applicantId, requestId || null]
+  );
+  if (!rows[0]) {
+    const err = new Error("Postulante no encontrado");
+    err.status = 404;
+    throw err;
+  }
+  return rows[0];
+};
+
 const deleteApplicant = async (id) => {
   if (!id) throw new Error("ID de aspirante requerido");
   await ensureApplicantsTables();
@@ -1368,6 +1406,8 @@ module.exports = {
   mapApplicantToProfile,
   listApplicants,
   getApplicantById,
+  listOrphanApplicants,
+  linkApplicantToRequest,
   deleteApplicant,
   ensureApplicantsTables,
   // Helpers puros expuestos para pruebas de verificacion.

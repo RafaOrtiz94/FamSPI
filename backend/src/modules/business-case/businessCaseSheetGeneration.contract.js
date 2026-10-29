@@ -24,6 +24,9 @@ const generationRequestSchema = Joi.object({
         descripcion: Joi.string().allow("").optional(),
         // Activos TI existentes reservados para cubrir este item (columna "Estado").
         activos_reservados: Joi.array().items(Joi.string().allow("")).optional(),
+        // Items bajo "Otros" (catalogo propio del BC): fila propia, ordenada por id.
+        otros_item: Joi.boolean().optional(),
+        orden: Joi.number().optional(),
       }).required(),
     )
     .default({}),

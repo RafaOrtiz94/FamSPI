@@ -6003,7 +6003,10 @@ const clockInUnexpected = async (req, res) => {
     try {
       result = await db.query(
         `UPDATE attendance_exceptions
-            SET status = 'COMPLETED', end_time = $1, end_location = $2
+            SET status = 'COMPLETED', end_time = $1, end_location = $2,
+                -- Los reportes leen return_time: se llena igual que en el fallback legacy.
+                return_time = COALESCE(return_time, $1),
+                return_location = COALESCE(return_location, $2)
           WHERE id = (
             SELECT id
               FROM attendance_exceptions

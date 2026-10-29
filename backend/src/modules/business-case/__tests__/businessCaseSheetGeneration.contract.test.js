@@ -29,6 +29,20 @@ describe("businessCaseSheetGeneration.contract", () => {
     expect(result.value.inversiones.Servidor.descripcion).toBe("Servidor en rack");
   });
 
+  it("accepts otros_item and orden in inversiones", () => {
+    const result = validateGenerationRequest({
+      fields: { client_name: "Cliente Demo" },
+      inversiones: {
+        "otros_item:78": { otros_item: true, orden: 78, nombre: "Otros", cantidad: 2, precio: 0 },
+        USB: { otros_item: false, orden: 79, cantidad: 2, precio: 0 },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.value.inversiones["otros_item:78"].otros_item).toBe(true);
+    expect(result.value.inversiones.USB.orden).toBe(79);
+  });
+
   it("rejects invalid inversiones payload", () => {
     const result = validateGenerationRequest({
       fields: { client_name: "Cliente Demo" },

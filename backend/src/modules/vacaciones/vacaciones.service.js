@@ -1109,7 +1109,7 @@ async function createVacationRequest(payload, userId) {
         type: "info",
         source: "vacaciones",
         priority: 0,
-        email: false,
+        email: true,
         meta: {
           solicitud_id: rows[0].id,
           solicitante: user.email,

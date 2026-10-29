@@ -19,8 +19,13 @@ const importLimiter = rateLimit({
 
 router.use(express.json({ limit: "5mb" }));
 
+const thRoles = ["talento_humano", "gerencia", "gerencia_general", "admin"];
+
 router.get("/", ctrl.listApplicants);
+// Antes de "/:id" para que "orphans" no se interprete como id.
+router.get("/orphans", verifyToken, requireRole(thRoles), ctrl.listOrphanApplicants);
 router.get("/:id", ctrl.getApplicantById);
+router.patch("/:id/personnel-request", verifyToken, requireRole(thRoles), ctrl.linkApplicantToRequest);
 
 router.post("/import", importLimiter, applicantsApiKey, ctrl.importApplicant);
 

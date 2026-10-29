@@ -5,8 +5,8 @@ import {
   FiCalendar,
   FiChevronDown,
   FiDownload,
-  FiEye,
   FiFileText,
+  FiPaperclip,
   FiRefreshCw,
   FiSearch,
   FiShield,
@@ -81,6 +81,18 @@ const ItemActionIcons = ({ item }) => {
   if (item?.pdf_validacion_legal_url) {
     actions.push({ key: "legal", href: item.pdf_validacion_legal_url, icon: FiShield, label: "Verificar firma" });
   }
+  // Justificantes subidos por el solicitante y evidencia de coordinación de
+  // usuarios externos (ing_servicio_ext / esp_app_ext, flujo autoaprobado).
+  const attachments = [
+    { prefix: "justificante", label: "Ver justificante", urls: item?.justificantes_urls },
+    { prefix: "coord", label: "Ver justificante de coordinación", urls: item?.external_coordination_urls },
+  ];
+  attachments.forEach(({ prefix, label, urls }) => {
+    const valid = (Array.isArray(urls) ? urls : []).filter((u) => String(u || "").trim());
+    valid.forEach((href, idx) => {
+      actions.push({ key: `${prefix}-${idx}`, href, icon: FiPaperclip, label: valid.length > 1 ? `${label} ${idx + 1}` : label });
+    });
+  });
   if (!actions.length) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -314,26 +326,6 @@ const PermisosConsolidadoView = () => {
                     {relTime && <span className="text-slate-400">· solicitado {relTime}</span>}
                   </p>
                   <ItemActionIcons item={item} />
-                  {Array.isArray(item.justificantes_urls) && item.justificantes_urls.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {item.justificantes_urls.map((url, idx) => (
-                        <a key={`${item.id}-doc-${idx}`} href={url} target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-[10px] font-semibold text-blue-700 hover:bg-blue-50">
-                          <FiEye size={11} /> Documento {idx + 1}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  {Array.isArray(item.external_coordination_urls) && item.external_coordination_urls.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {item.external_coordination_urls.map((url, idx) => (
-                        <a key={`${item.id}-coord-${idx}`} href={url} target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 rounded-full border border-slate-200 px-2.5 py-1 text-[10px] font-semibold text-slate-700 hover:bg-slate-50">
-                          <FiEye size={11} /> Coordinación {idx + 1}
-                        </a>
-                      ))}
-                    </div>
-                  )}
                   <TraceLine item={item} />
                 </div>
                 );

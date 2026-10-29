@@ -218,10 +218,10 @@ try {
     "--set-env-vars", "DB_SSL=true",
     "--set-env-vars", "FRONTEND_URL=https://fam-spi-front.web.app",
     "--set-env-vars", "GOOGLE_REDIRECT_URI=https://spi-backend-983537733948.us-central1.run.app/api/v1/auth/google/callback",
-    "--set-env-vars", "DB_HOST=ep-muddy-sun-ah5um48r.c-3.us-east-1.aws.neon.tech",  # MIGRACION 2026-09-28 — respaldo final con origen congelado desde lucky-bar. Endpoint DIRECTO (SIN -pooler).
+    "--set-env-vars", "DB_HOST=ep-wispy-moon-aqszgsal.c-8.us-east-1.aws.neon.tech",  # MIGRACION 2026-10-28 desde muddy-sun. Endpoint DIRECTO (SIN -pooler).
     "--set-env-vars", "DB_PORT=5432",
     "--set-env-vars", "DB_USER=neondb_owner",
-    "--set-env-vars", "DB_NAME=FamSPI",
+    "--set-env-vars", "DB_NAME=neondb",
     "--set-env-vars", "GOOGLE_CLIENT_ID=18376271129-1v6irnav4n49298sspaij02qjnigeln3.apps.googleusercontent.com",
     # Audiencia OIDC del proyecto de Apps Script del complemento de Gmail. Debe
     # permanecer aqui porque --set-env-vars reemplaza el conjunto completo.
