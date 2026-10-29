@@ -9,7 +9,7 @@ Administra procesos internos de personal: expedientes de colaboradores, permisos
 ## Alcance funcional
 - Registro y mantenimiento de personal (`employees`).
 - Gestion de permisos y vacaciones con flujo de aprobacion.
-- Gestion de matrículas de estudios y validaciones asociadas.
+- Gestion de matrÃ­culas de estudios y validaciones asociadas.
 - Solicitudes de personal con ciclo de seleccion/contratacion.
 - Gestion de perfiles y documentos de colaboradores.
 - Control de asistencia, excepciones y horas extra.

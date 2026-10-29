@@ -6,13 +6,15 @@ const ComplianceDashboard = () => {
   const { data: stats, isLoading } = useQuery({
     queryKey: ['ca01xx-compliance-stats'],
     queryFn: () => api.get('/ca01xx/compliance/dashboard'),
-    refetchInterval: 60000,
+    refetchInterval: 600000, // >5min: deja hueco para que Neon autosuspenda entre polls
   });
 
   const { data: pendingAlarms } = useQuery({
     queryKey: ['ca01xx-pending-alarms'],
     queryFn: () => api.get('/ca01xx/alarms?status=open'),
-    refetchInterval: 30000,
+    // ponytail: Calidad sin uso real todavia (desarrollo pausado), ver
+    // CONTEXT.md del modulo. Volver a 30s cuando haya adopcion real.
+    refetchInterval: 600000, // >5min: deja hueco para que Neon autosuspenda entre polls
   });
 
   const { data: overdueCalibrations } = useQuery({

@@ -146,3 +146,8 @@ export const getPreventiveHistory = async (params = {}) => {
  const { data } = await api.get("/mantenimientos/preventive/history", { params });
  return data?.rows || [];
 };
+
+export const generateTiAnnualSchedule = async (payload = {}) => {
+ const { data } = await api.post("/mantenimientos/ti/annual-schedule/generate", payload);
+ return data?.data || null;
+};

@@ -21,11 +21,18 @@ const upload = multer({
   },
 });
 
+const documentUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
 router.use(verifyToken);
 
 router.get("/", ctrl.getMine);
 router.post("/", upload.single("avatar"), ctrl.createMine);
 router.put("/", upload.single("avatar"), ctrl.updateMine);
+router.get("/documents", ctrl.getMyDocuments);
+router.post("/documents", documentUpload.single("file"), ctrl.uploadMyDocument);
 
 // Manejo explícito de errores de carga (tamaño/MIME)
 router.use((err, _req, res, next) => {

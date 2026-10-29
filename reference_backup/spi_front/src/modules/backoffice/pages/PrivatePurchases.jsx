@@ -162,7 +162,7 @@ const PrivatePurchasesPage = () => {
       }
       const base64payload = base64.split(",")[1];
       if (!base64payload || !base64payload.trim()) {
-        showToast("El archivo de oferta est��� vac���o o no se pudo procesar", "error");
+        showToast("El archivo de oferta está vacío o no se pudo procesar", "error");
         setOfferModal((prev) => ({ ...prev, loading: false }));
         return;
       }

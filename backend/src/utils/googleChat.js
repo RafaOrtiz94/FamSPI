@@ -4,6 +4,23 @@ const logger = require("../config/logger");
 const defaultWebhook = process.env.GCHAT_WEBHOOK_URL || process.env.GCHAT_WEBHOOK;
 const CHAT_DISABLED = process.env.DISABLE_GCHAT === "true";
 
+// Space privado de Talento Humano (solo personal TH + el sistema) -- separado
+// del grupo general de notificaciones para que las alertas de asistencia
+// (irregularidades, solicitudes de regularizacion/teletrabajo) no se mezclen
+// con las de Business Case/compras/mantenimientos que usan el webhook default.
+const talentoHumanoWebhook = process.env.GCHAT_WEBHOOK_URL_TH;
+const TALENTO_HUMANO_CHAT_SOURCES = new Set([
+  "attendance.irregularity",
+  "attendance.telework",
+]);
+
+function resolveWebhookUrlForSource(source) {
+  if (TALENTO_HUMANO_CHAT_SOURCES.has(source) && talentoHumanoWebhook) {
+    return talentoHumanoWebhook;
+  }
+  return defaultWebhook;
+}
+
 function htmlToText(html = "") {
   return String(html || "")
     .replace(/<\s*br\s*\/?>/gi, "\n")
@@ -36,4 +53,5 @@ async function sendChatMessage({ text, threadKey = null, webhookUrl = defaultWeb
 module.exports = {
   sendChatMessage,
   htmlToText,
+  resolveWebhookUrlForSource,
 };

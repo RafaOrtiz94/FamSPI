@@ -1,0 +1,397 @@
+<title>Blue Sheet: De formulario a herramienta</title>
+<style>
+  :root{
+    --ink:#12141A; --paper:#F3F4F7; --card:#FFFFFF; --line:#E1E3E9;
+    --muted:#5B6172; --muted-2:#868C9C;
+    --senior:#3457D5; --senior-soft:#EAEEFC;
+    --pro:#0E8F72; --pro-soft:#E4F5F0;
+    --ultra:#7C3AED; --ultra-soft:#F1E9FE;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ink:#EDEEF2; --paper:#0E1015; --card:#171921; --line:#2A2D38;
+      --muted:#A9AEBD; --muted-2:#7D8299;
+      --senior:#7B93F5; --senior-soft:#1B2440;
+      --pro:#4FCBAA; --pro-soft:#0F2A24;
+      --ultra:#B794FA; --ultra-soft:#241A3D;
+    }
+  }
+  :root[data-theme="dark"]{
+    --ink:#EDEEF2; --paper:#0E1015; --card:#171921; --line:#2A2D38;
+    --muted:#A9AEBD; --muted-2:#7D8299;
+    --senior:#7B93F5; --senior-soft:#1B2440;
+    --pro:#4FCBAA; --pro-soft:#0F2A24;
+    --ultra:#B794FA; --ultra-soft:#241A3D;
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    font-size:15px; line-height:1.55;
+    padding-inline:20px; padding-block:0;
+  }
+  h1,h2,h3{font-family:"Fraunces", Georgia, serif; letter-spacing:-0.01em; text-wrap:balance;}
+  .tag{font-family:"IBM Plex Mono", ui-monospace, monospace; font-size:11.5px;}
+
+  nav.top{
+    position:sticky; top:env(safe-area-inset-top,0px); z-index:20;
+    margin-inline:-20px; padding:10px 20px;
+    background:color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+    display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  }
+  nav.top .brand{font-family:"Fraunces",serif; font-weight:600; font-size:14.5px; white-space:nowrap;}
+  nav.top .links{display:flex; gap:4px; flex-wrap:wrap; margin-left:auto;}
+  nav.top .links a{
+    font-size:12.5px; padding:6px 10px; border-radius:100px;
+    border:1px solid var(--line); color:var(--muted); text-decoration:none;
+    white-space:nowrap;
+  }
+  nav.top .links a:hover{color:var(--ink); border-color:var(--muted-2);}
+
+  header.hero{max-width:760px; margin:0 auto; padding-block:44px 28px;}
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-size:11.5px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); margin-bottom:14px;
+  }
+  .eyebrow::before{content:""; width:6px; height:6px; border-radius:50%; background:var(--senior);}
+  header.hero h1{font-size:clamp(28px,5.5vw,42px); line-height:1.08; margin:0 0 14px;}
+  header.hero h1 em{font-style:normal; color:var(--senior);}
+  header.hero p.lead{color:var(--muted); font-size:16px; max-width:62ch; margin:0;}
+
+  .findings{max-width:760px; margin:0 auto 40px; display:flex; flex-direction:column; gap:10px;}
+  .findings .row{
+    display:flex; gap:12px; align-items:flex-start; border:1px solid var(--line);
+    border-radius:14px; padding:14px 16px; background:var(--card);
+  }
+  .findings .row .dot{
+    width:8px; height:8px; border-radius:50%; background:#DC2626; margin-top:6px; flex-shrink:0;
+  }
+  .findings .row p{margin:0; font-size:13.5px; color:var(--muted);}
+  .findings .row p b{color:var(--ink);}
+
+  .ladder{max-width:960px; margin:0 auto 56px; display:grid; grid-template-columns:repeat(3,1fr); gap:14px;}
+  .ladder .rung{
+    border:1px solid var(--line); border-radius:16px; padding:18px; background:var(--card);
+    display:flex; flex-direction:column; gap:8px;
+  }
+  .ladder .rung .dot{width:10px;height:10px;border-radius:50%;}
+  .ladder .rung h4{margin:0; font-family:"Fraunces",serif; font-size:17px;}
+  .ladder .rung .meta{font-size:12px; color:var(--muted-2);}
+  .ladder .rung p{margin:0; font-size:13px; color:var(--muted);}
+  @media (max-width:680px){ .ladder{grid-template-columns:1fr;} }
+
+  section.tier{max-width:960px; margin:0 auto; padding-block:52px; border-top:1px solid var(--line); scroll-margin-top:64px;}
+  section.tier .tier-head{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:6px;}
+  section.tier .badge{
+    font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.06em;
+    padding:4px 10px; border-radius:100px; color:#fff; white-space:nowrap;
+  }
+  section.tier h2{font-size:clamp(24px,4vw,32px); margin:0;}
+  section.tier .tagline{color:var(--muted); font-size:14.5px; max-width:68ch; margin:10px 0 8px;}
+  section.tier .stats{display:flex; gap:22px; flex-wrap:wrap; margin:14px 0 30px; font-size:12.5px;}
+  section.tier .stats div{color:var(--muted-2);}
+  section.tier .stats b{display:block; color:var(--ink); font-size:15px; font-family:"Fraunces",serif;}
+
+  .area-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:14px; margin-bottom:26px;}
+  @media (max-width:680px){ .area-grid{grid-template-columns:1fr;} }
+  .area{border:1px solid var(--line); border-radius:14px; padding:16px 18px; background:var(--card);}
+  .area h3{font-size:14.5px; margin:0 0 10px; display:flex; align-items:center; gap:8px;}
+  .area h3 .n{
+    font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--muted-2);
+    border:1px solid var(--line); border-radius:6px; padding:1px 6px;
+  }
+  .area ul{margin:0; padding-left:18px; display:flex; flex-direction:column; gap:7px;}
+  .area li{font-size:13.3px; color:var(--ink);}
+  .area li .ref{color:var(--muted-2); font-size:11.5px;}
+
+  .kpi-row{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;}
+  .kpi{
+    border:1px dashed var(--line); border-radius:12px; padding:10px 14px; font-size:12.5px; color:var(--muted);
+    background:color-mix(in srgb, var(--card) 60%, var(--paper));
+  }
+  .kpi b{color:var(--ink); font-family:"IBM Plex Mono",monospace; font-weight:600;}
+
+  .done-note{
+    display:flex; gap:10px; align-items:flex-start; border:1px solid var(--pro);
+    background:var(--pro-soft); border-radius:12px; padding:12px 14px; font-size:12.6px; color:var(--muted); margin-top:6px;
+  }
+  .done-note b{color:var(--ink);}
+
+  #senior .badge{background:var(--senior);}
+  #senior .area h3 .n{color:var(--senior); border-color:var(--senior);}
+  #pro .badge{background:var(--pro);}
+  #pro .area h3 .n{color:var(--pro); border-color:var(--pro);}
+  #ultra .badge{background:var(--ultra);}
+  #ultra .area h3 .n{color:var(--ultra); border-color:var(--ultra);}
+  #ultra{background:linear-gradient(180deg, transparent, var(--ultra-soft) 40%, transparent);}
+
+  .ai-note{
+    display:flex; gap:10px; align-items:flex-start; border:1px solid var(--ultra);
+    background:var(--ultra-soft); border-radius:12px; padding:12px 14px; font-size:12.6px; color:var(--muted); margin-top:20px;
+  }
+  .ai-note b{color:var(--ink);}
+
+  footer.close{max-width:760px; margin:0 auto; padding:52px 0 60px; border-top:1px solid var(--line);}
+  footer.close h2{font-size:22px; margin:0 0 10px;}
+  footer.close p{color:var(--muted); font-size:14px; max-width:64ch;}
+  footer.close .steps{display:flex; flex-direction:column; gap:10px; margin-top:18px;}
+  footer.close .steps div{display:flex; gap:12px; align-items:baseline; font-size:13.5px;}
+  footer.close .steps .idx{font-family:"IBM Plex Mono",monospace; color:var(--muted-2); width:18px; flex-shrink:0;}
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<nav class="top">
+  <span class="brand">Blue Sheet · Ruta a la cima</span>
+  <div class="links">
+    <a href="#senior">Senior</a>
+    <a href="#pro">Senior Pro</a>
+    <a href="#ultra">Senior Ultra</a>
+  </div>
+</nav>
+
+<header class="hero">
+  <span class="eyebrow">Roadmap · CRM-Fam / Blue Sheet</span>
+  <h1>El Blue Sheet ya tiene toda la <em>metodología</em>. Le falta ser una herramienta que se use.</h1>
+  <p class="lead">
+    Tres planes acumulativos, esta vez enfocados solo en la pestaña Blue Sheet
+    (<span class="tag">BlueSheetPage.jsx</span>). El hallazgo central al revisar el código:
+    el backend de Miller Heiman Strategic Selling está completo — versionado, comentarios de revisión,
+    matriz de comprador-resultado — pero varias piezas nunca llegaron a tener pantalla, así que hoy
+    se sienten invisibles o rotas.
+  </p>
+</header>
+
+<div class="findings">
+  <div class="row">
+    <span class="dot"></span>
+    <p><b>El botón "Observar" no dice por qué.</b> El backend acepta comentarios estructurados por sección
+    (<span class="tag">crm_review_comments</span>: texto, severidad, "requiere corrección") — pero el frontend
+    siempre manda un objeto vacío. Un manager observa un Blue Sheet y el comercial nunca ve la razón.</p>
+  </div>
+  <div class="row">
+    <span class="dot"></span>
+    <p><b>El historial de versiones no tiene pantalla.</b> Cada aprobación crea un snapshot en
+    <span class="tag">crm_blue_sheet_versions</span> — el endpoint existe, nadie lo consume.</p>
+  </div>
+  <div class="row">
+    <span class="dot"></span>
+    <p><b>Las tareas vencidas no avisan a nadie.</b> Ya penalizan el health score, pero no hay ningún
+    recordatorio proactivo — hay que entrar a mirar para enterarse.</p>
+  </div>
+</div>
+
+<div class="ladder">
+  <div class="rung">
+    <span class="dot" style="background:var(--senior)"></span>
+    <h4>Senior</h4>
+    <span class="meta">3–4 semanas · cerrar el círculo</span>
+    <p>Conectar lo que el backend ya hace con una pantalla real: comentarios, historial, recordatorios, exportar.</p>
+  </div>
+  <div class="rung">
+    <span class="dot" style="background:var(--pro)"></span>
+    <h4>Senior Pro</h4>
+    <span class="meta">2 meses · metodología completa</span>
+    <p>La Coverage Matrix real de Miller Heiman, plantillas, patrones de ganado/perdido, próxima mejor acción.</p>
+  </div>
+  <div class="rung">
+    <span class="dot" style="background:var(--ultra)"></span>
+    <h4>Senior Ultra</h4>
+    <span class="meta">4+ meses · coach de IA</span>
+    <p>El Blue Sheet se escribe solo desde lo que ya registraste, y avisa antes de que el deal se enfríe.</p>
+  </div>
+</div>
+
+<!-- ============================= SENIOR ============================= -->
+<section class="tier" id="senior">
+  <div class="tier-head">
+    <span class="badge">PLAN 1</span>
+    <h2>Senior — cerrar el círculo</h2>
+  </div>
+  <p class="tagline">
+    Ninguno de estos cinco puntos necesita arquitectura nueva — el dato ya existe o casi.
+    Es conectar backend con pantalla, exactamente el mismo patrón que ya funcionó con el checklist
+    de completitud y los iconos de red flag.
+  </p>
+  <div class="stats">
+    <div><b class="num">3–4</b>semanas</div>
+    <div><b>1</b>migración (ya aplicada: <span class="tag">303_crm_action_items_reminders</span>)</div>
+  </div>
+
+  <div class="area-grid">
+    <div class="area">
+      <h3><span class="n">01</span>Comentarios de revisión reales</h3>
+      <ul>
+        <li>Modal al Observar/Aprobar para escribir el comentario por sección, con severidad y "requiere corrección" — el backend ya lo procesa (<span class="ref">observeBlueSheet</span>), solo falta el formulario.</li>
+        <li>Mostrar el historial de comentarios al comercial cuando el Blue Sheet vuelve a <span class="ref">needs_update</span>/<span class="ref">observed</span> — hoy desaparecen sin dejar rastro visible.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">02</span>Historial de versiones visible</h3>
+      <ul>
+        <li>Nueva pestaña "Historial" con cada snapshot de <span class="ref">crm_blue_sheet_versions</span> — quién aprobó, cuándo, qué cambió.</li>
+        <li>Diff simple de los campos clave (objetivo, estrategia, situación) entre dos versiones.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">03</span>Recordatorios de acciones vencidas</h3>
+      <ul>
+        <li>Notificación al dueño de la tarea cuando vence, reusando <span class="ref">notificationsService</span> ya integrado en el módulo.</li>
+        <li>Requiere saber si ya se avisó para no repetir el aviso cada vez que corre el job — por eso la migración <span class="ref">303</span> (columna <span class="ref">reminder_sent_at</span> en <span class="ref">crm_action_items</span>), ya aplicada.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">04</span>Exportar a PDF</h3>
+      <ul>
+        <li>Blue Sheet completo (objetivo, compradores, competidores, scorecard, red flags, acciones) para compartir o imprimir antes de una reunión con el cliente o con gerencia.</li>
+        <li>Mismo patrón PDFKit ya usado en Reports/TI-Assets — sin librería nueva.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="done-note">
+    <span>✓</span>
+    <span><b>Ya resuelto en la sesión anterior —</b> checklist visual de completitud (11 criterios reales, no solo el %) y los iconos de red flag marcables en Compradores/Competidores/Scorecard/Acciones. Este plan Senior parte de ahí, no lo repite.</span>
+  </div>
+
+  <div class="kpi-row" style="margin-top:20px;">
+    <div class="kpi">% de Blue Sheets observados con comentario real <b>100%</b></div>
+    <div class="kpi">Tareas vencidas sin recordatorio <b>0</b></div>
+    <div class="kpi">Tiempo para preparar una reunión con el cliente <b>-1 exportación manual</b></div>
+  </div>
+</section>
+
+<!-- ============================= PRO ============================= -->
+<section class="tier" id="pro">
+  <div class="tier-head">
+    <span class="badge">PLAN 2</span>
+    <h2>Senior Pro — la metodología completa</h2>
+  </div>
+  <p class="tagline">
+    Miller Heiman Strategic Selling tiene una pieza central que hoy no existe en ninguna pantalla:
+    la Coverage Matrix (cruzar cada comprador contra el resultado de venta que se busca con él). Este
+    plan la construye, y con ella el resto de la disciplina real del método.
+  </p>
+  <div class="stats">
+    <div><b class="num">2</b>meses</div>
+    <div><b>nuevo</b>motor de plantillas</div>
+  </div>
+
+  <div class="area-grid">
+    <div class="area">
+      <h3><span class="n">01</span>Coverage Matrix</h3>
+      <ul>
+        <li>Vista de matriz: filas = compradores, columnas = resultados de venta (<span class="ref">crm_win_results</span>) — hoy esa relación existe en la base pero solo se ve como dos listas separadas (pestañas "Compradores" y "Resultados").</li>
+        <li>Resalta huecos: comprador sin resultado vinculado, resultado sin comprador — exactamente lo que ya cuenta <span class="ref">calculateCompletenessScore</span> pero sin mostrarlo visualmente.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">02</span>Plantillas de Blue Sheet</h3>
+      <ul>
+        <li>Prellenar situación actual/deseada según <span class="ref">account_type</span>/industria de la cuenta — reduce la hoja en blanco al crear uno nuevo.</li>
+        <li>Plantillas editables desde <span class="ref">CrmSettingsPage</span> (mismo patrón que criterios de scorecard y razones de pérdida).</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">03</span>Patrones de ganado/perdido</h3>
+      <ul>
+        <li>Cruzar completeness score, scorecard y red flags de oportunidades <span class="ref">won</span> vs <span class="ref">lost</span> — con datos reales ya en <span class="ref">crm_opportunities</span>, esto es un reporte nuevo, no una re-arquitectura.</li>
+        <li>"Los Blue Sheets que ganan tienen en promedio 85% de completitud; los que pierden, 40%" — ese tipo de señal, calculada, no adivinada.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">04</span>Próxima mejor acción</h3>
+      <ul>
+        <li>Si falta comprador económico → sugerir crear la acción "Identificar comprador económico" con un clic, en vez de que el vendedor tenga que saber qué falta.</li>
+        <li>Se alimenta directo del mismo checklist de completitud ya construido — cada criterio no cumplido ya sabe qué pestaña y qué acción lo resuelve.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">05</span>Comentarios por sección, no solo al observar</h3>
+      <ul>
+        <li>Un manager puede dejar una nota en "Compradores" sin tener que observar todo el Blue Sheet — reusa <span class="ref">crm_review_comments</span> con <span class="ref">section_name</span>, ya soportado.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">06</span>Aprobación multinivel para deals grandes</h3>
+      <ul>
+        <li>Si <span class="ref">estimated_amount</span> supera un umbral, requiere aprobación de gerencia además del manager directo — reusa el motor <span class="ref">signature-workflows</span> ya usado en Permisos/TI-assets.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi">Huecos de Coverage Matrix detectados antes del cierre <b>visible en pantalla</b></div>
+    <div class="kpi">Tiempo para armar un Blue Sheet nuevo <b>-30%</b></div>
+  </div>
+</section>
+
+<!-- ============================= ULTRA ============================= -->
+<section class="tier" id="ultra">
+  <div class="tier-head">
+    <span class="badge">PLAN 3</span>
+    <h2>Senior Ultra — el Blue Sheet se escribe solo</h2>
+  </div>
+  <p class="tagline">
+    El comercial ya registra actividades, notas y actualiza el CRM en su día a día. La apuesta:
+    usar ese rastro real para que el Blue Sheet deje de ser una tarea aparte y se mantenga
+    actualizado casi sin esfuerzo — y para que avise antes de que un deal se enfríe, no después.
+  </p>
+  <div class="stats">
+    <div><b class="num">4+</b>meses</div>
+    <div><b>IA</b>sobre datos propios del Blue Sheet</div>
+  </div>
+
+  <div class="area-grid">
+    <div class="area">
+      <h3><span class="n">01</span>Redacción asistida</h3>
+      <ul>
+        <li>Borrador de "Objetivo de venta" y "Resumen de estrategia" generado desde las actividades y notas ya registradas en esa oportunidad — el vendedor edita en vez de partir de cero.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">02</span>Red flags no declaradas</h3>
+      <ul>
+        <li>Analiza el texto libre de notas/actividades buscando señales que hoy nadie marca a mano: mención de un competidor no registrado, cambio de interlocutor, dudas de presupuesto.</li>
+        <li>Se integra con el mismo sistema de iconos de red flag ya construido — la IA sugiere, el vendedor confirma con un clic (mismo patrón que las tareas vencidas del plan Senior).</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">03</span>Coach virtual proactivo</h3>
+      <ul>
+        <li>Avisos automáticos tipo "cierre estimado en 15 días, Blue Sheet sin actualizar hace 20" o "sin coach identificado en una oportunidad de $50k" — antes de que sea tarde, no en el reporte mensual.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">04</span>Probabilidad de cierre real</h3>
+      <ul>
+        <li>Modelo entrenado con el histórico propio: completeness score, scorecard, red flags y resultado real (<span class="ref">won</span>/<span class="ref">lost</span>) de oportunidades ya cerradas — no una estimación manual de <span class="ref">probability_override</span>.</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3><span class="n">05</span>Resumen ejecutivo automático</h3>
+      <ul>
+        <li>Un párrafo por oportunidad activa para gerencia, generado desde el Blue Sheet real — reemplaza el "dame un resumen" manual antes de cada reunión de pipeline.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="ai-note">
+    <span>🧠</span>
+    <span><b>Nota de costo/infraestructura —</b> igual que en el plan Ultra del CRM general: empezar con el modelo más económico para redacción/resumen y medir adopción antes de invertir en el modelo predictivo de probabilidad de cierre, que es la pieza que más datos históricos limpios necesita para ser confiable.</span>
+  </div>
+</section>
+
+<footer class="close">
+  <h2>Cómo secuenciarlo</h2>
+  <p>Mismo criterio que el roadmap general de CRM-Fam: acumulativo, no alternativo.</p>
+  <div class="steps">
+    <div><span class="idx">01</span> <b>Senior</b> ya tiene su migración aplicada (<span class="tag">303</span>) — listo para implementar cuando lo apruebes.</div>
+    <div><span class="idx">02</span> <b>Senior Pro</b> vale la pena evaluarlo junto con el Senior Pro del CRM general (comparten la Coverage Matrix con "próxima mejor acción" y aprobación multinivel).</div>
+    <div><span class="idx">03</span> <b>Senior Ultra</b>, igual que en el roadmap general: decisión de inversión aparte, no continuación automática.</div>
+  </div>
+</footer>

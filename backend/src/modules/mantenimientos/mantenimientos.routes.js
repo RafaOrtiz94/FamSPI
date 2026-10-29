@@ -57,7 +57,7 @@ const preventivePlanAdminRoles = [
 router.post(
   "/",
   verifyToken,
-  requireRole(["tecnico"]),
+  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "ti", "jefe_ti", "admin_ti"]),
   upload.fields([
     { name: "firma_responsable", maxCount: 1 },
     { name: "firma_receptor", maxCount: 1 },
@@ -67,7 +67,18 @@ router.post(
 );
 
 // 📋 Listar mantenimientos del técnico o general
-router.get("/", verifyToken, ctrl.listMantenimientos);
+router.get(
+  "/",
+  verifyToken,
+  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia", "ti", "jefe_ti", "admin_ti"]),
+  ctrl.listMantenimientos
+);
+router.post(
+  "/ti/annual-schedule/generate",
+  verifyToken,
+  requireRole(["ti", "jefe_ti", "admin_ti", "gerencia"]),
+  ctrl.generateAnnualScheduleForTi,
+);
 
 // ======================================================
 // ST-01-02 Preventivos - Workspace Empresarial

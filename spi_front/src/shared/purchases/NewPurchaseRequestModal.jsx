@@ -12,6 +12,9 @@ const NewPurchaseRequestModal = ({
  onOpenChange,
  mode = "acp_required",
  onSuccess,
+ initialClient,
+ initialOfferKind,
+ hideOfferKindSelector,
 }) => {
  const [internalIsOpen, setInternalIsOpen] = useState(false);
 
@@ -35,6 +38,9 @@ const NewPurchaseRequestModal = ({
  isOpen={isOpen}
  onClose={handleClose}
  onSuccess={handleSuccess}
+ initialClient={initialClient}
+ initialOfferKind={initialOfferKind}
+ hideOfferKindSelector={hideOfferKindSelector}
  />
  );
  }
@@ -44,6 +50,7 @@ const NewPurchaseRequestModal = ({
  isOpen={isOpen}
  onClose={handleClose}
  onSuccess={handleSuccess}
+ initialClient={initialClient}
  />
  );
 };

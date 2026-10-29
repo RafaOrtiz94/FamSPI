@@ -58,13 +58,11 @@ router.get(
 
 router.get(
     '/:id/workspace',
-    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
     personnelRequestsController.getRequestWorkspace
 );
 
 router.get(
     '/:id/applicants',
-    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
     personnelRequestsController.getRequestApplicants
 );
 
@@ -88,6 +86,12 @@ router.patch(
     '/:id/collaborator',
     requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
     personnelRequestsController.linkCollaborator
+);
+
+router.patch(
+    '/:id/requester',
+    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
+    personnelRequestsController.linkRequester
 );
 
 router.patch(

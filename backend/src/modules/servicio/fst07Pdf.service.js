@@ -60,40 +60,40 @@ const generateFst07PdfBuffer = async ({
     doc.on("error", reject);
     doc.on("end", () => resolve(Buffer.concat(chunks)));
 
-    doc.fontSize(13).font("Helvetica-Bold").text(subtitle, { align: "center" });
+    doc.fontSize(13).font("Times-Bold").text(subtitle, { align: "center" });
     doc.moveDown(0.6);
-    doc.fontSize(10).font("Helvetica");
+    doc.fontSize(10).font("Times-Roman");
     doc.text(`Fecha de inspección: ${formatDateEsLabel(scheduledDate)}`);
     doc.text(`Cliente: ${String(clientName || "Cliente").trim() || "Cliente"}`);
     doc.text(`Equipo: ${String(equipmentName || "Equipo no especificado").trim() || "Equipo no especificado"}`);
     doc.text(`Responsable técnico: ${String(responsibleName || "N/D").trim() || "N/D"}`);
     doc.text(`Representante cliente: ${String(clientSignerName || "N/D").trim() || "N/D"}`);
     doc.moveDown(0.6);
-    doc.font("Helvetica-Bold").text("Checklist de inspección");
+    doc.font("Times-Bold").text("Checklist de inspección");
     doc.moveDown(0.3);
-    doc.font("Helvetica");
+    doc.font("Times-Roman");
 
     let currentSection = "";
     checklistRows.forEach((row, index) => {
       if (row.section_label !== currentSection) {
         currentSection = row.section_label;
         doc.moveDown(0.25);
-        doc.font("Helvetica-Bold").text(currentSection);
-        doc.font("Helvetica");
+        doc.font("Times-Bold").text(currentSection);
+        doc.font("Times-Roman");
       }
       doc.text(`${index + 1}. ${row.label}`, { continued: true });
-      doc.font("Helvetica-Bold").text(`  [${row.answer}]`);
-      doc.font("Helvetica");
+      doc.font("Times-Bold").text(`  [${row.answer}]`);
+      doc.font("Times-Roman");
     });
 
     doc.moveDown(0.6);
-    doc.font("Helvetica-Bold").text("Observaciones y recomendaciones");
-    doc.font("Helvetica").text(observations || "Sin observaciones");
+    doc.font("Times-Bold").text("Observaciones y recomendaciones");
+    doc.font("Times-Roman").text(observations || "Sin observaciones");
     doc.moveDown(0.2);
     doc.text(recommendations || "Sin recomendaciones");
     doc.moveDown(0.6);
-    doc.font("Helvetica-Bold").text("Resultado de inspección");
-    doc.font("Helvetica").text(resultLabel);
+    doc.font("Times-Bold").text("Resultado de inspección");
+    doc.font("Times-Roman").text(resultLabel);
 
     if (normalizedResult !== SITE_INSPECTION_RESULT.COMPLIANT) {
       doc.text(`Fecha propuesta para reinspección: ${formatDateEsLabel(followUpDate)}`);

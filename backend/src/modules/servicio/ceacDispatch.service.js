@@ -2,6 +2,11 @@ const db = require("../../config/db");
 const notificationManager = require("../notifications/notificationManager");
 const notificationsService = require("../notifications/notifications.service");
 
+// jefe_tecnico/servicio_tecnico/tecnico/ingeniero/especialista_aplicaciones son
+// aliases legacy (ver ROLE_GROUPS en middlewares/roles.js) -- se mantienen para
+// cuentas viejas, pero los roles vigentes (jefe_servicio/ing_servicio/esp_app)
+// faltaban aca, bloqueando en silencio a tecnicos con el rol moderno aunque la
+// ruta (correctiveWriteRoles en servicio.routes.js) ya los dejaba entrar.
 const CEAC_ROLES = Object.freeze([
   "ceac",
   "ti",
@@ -10,12 +15,14 @@ const CEAC_ROLES = Object.freeze([
   "servicio_tecnico",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
+  "jefe_servicio",
 ]);
 
 const DISPATCH_ROLES = Object.freeze([
   "dispatcher",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
+  "jefe_servicio",
   "servicio_tecnico",
 ]);
 
@@ -29,8 +36,11 @@ const COMMERCIAL_ROLES = Object.freeze([
 const TECH_SPECIALIST_ROLES = Object.freeze([
   "servicio_tecnico",
   "tecnico",
+  "ing_servicio",
+  "esp_app",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
+  "jefe_servicio",
   "ingeniero",
   "especialista_aplicaciones",
 ]);

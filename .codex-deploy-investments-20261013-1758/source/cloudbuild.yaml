@@ -1,0 +1,27 @@
+# Build con cache de capas: --cache-from reutiliza las capas apt + npm ci de
+# la imagen anterior (:latest) cuando package*.json no cambio. Sin esto, Cloud
+# Build parte de cero cada vez (~4-6 min de apt + npm ci).
+steps:
+  - name: "gcr.io/cloud-builders/docker"
+    entrypoint: "bash"
+    args:
+      - "-c"
+      - "docker pull ${_IMAGE}:latest || exit 0"
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "--cache-from"
+      - "${_IMAGE}:latest"
+      - "-t"
+      - "${_IMAGE}:${_TAG}"
+      - "-t"
+      - "${_IMAGE}:latest"
+      - "."
+images:
+  - "${_IMAGE}:${_TAG}"
+  - "${_IMAGE}:latest"
+substitutions:
+  _IMAGE: "us-central1-docker.pkg.dev/famspi-sbox/cloud-run-source-deploy/spi-backend"
+  _TAG: "manual"
+options:
+  logging: CLOUD_LOGGING_ONLY

@@ -117,7 +117,6 @@ const ClientApprovalsWidget = () => {
  [loadRequests, loadApprovedRequests],
  );
 
- const pendingCount = requests.length;
  const approvedCount = approvedRequests.length;
 
  const documentLabels = [

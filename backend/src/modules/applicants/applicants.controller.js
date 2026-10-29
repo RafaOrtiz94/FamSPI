@@ -53,4 +53,49 @@ const getApplicantById = async (req, res) => {
   }
 };
 
-module.exports = { importApplicant, listApplicants, getApplicantById };
+const syncApplicantsFromSheet = async (req, res) => {
+  try {
+    const result = await service.syncApplicantsFromSheet();
+    logger.info({ result }, "Sync manual de postulantes desde Google Sheet");
+    return res.status(200).json({ ok: true, data: result });
+  } catch (err) {
+    logger.error({ err }, "Error sincronizando postulantes desde Google Sheet");
+    return res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "Error sincronizando postulantes desde el formulario",
+    });
+  }
+};
+
+const listOrphanApplicants = async (req, res) => {
+  try {
+    return res.status(200).json({ ok: true, data: await service.listOrphanApplicants() });
+  } catch (err) {
+    logger.error({ err }, "Error listando postulantes sin solicitud");
+    return res.status(500).json({ ok: false, message: err.message || "Error listando postulantes sin solicitud" });
+  }
+};
+
+const linkApplicantToRequest = async (req, res) => {
+  try {
+    const applicantId = parseInt(req.params.id, 10);
+    const requestId = req.body?.personnel_request_id ? parseInt(req.body.personnel_request_id, 10) : null;
+    if (!applicantId || (req.body?.personnel_request_id && !requestId)) {
+      return res.status(400).json({ ok: false, message: "Datos inválidos" });
+    }
+    const data = await service.linkApplicantToRequest(applicantId, requestId);
+    return res.status(200).json({ ok: true, data });
+  } catch (err) {
+    logger.error({ err }, "Error vinculando postulante a solicitud");
+    return res.status(err.status || 500).json({ ok: false, message: err.message || "Error vinculando postulante" });
+  }
+};
+
+module.exports = {
+  importApplicant,
+  listApplicants,
+  getApplicantById,
+  syncApplicantsFromSheet,
+  listOrphanApplicants,
+  linkApplicantToRequest,
+};

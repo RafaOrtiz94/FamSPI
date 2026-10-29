@@ -22,9 +22,12 @@ exports.listRequests = asyncHandler(async (req, res) => {
   const pageSize = parseInt(req.query.pageSize || "50", 10);
   const status = req.query.status || null;
   const q = req.query.q || null;
-  const type = req.query.type || null;
+  const roleName = String(req.user?.role || req.user?.role_name || "").trim().toLowerCase();
+  const type = roleName === "jefe_financiero" ? "F.VE-02" : req.query.type || null;
+  const mine = req.query.mine === "true" || req.query.mine === "1";
+  const requester_id = mine ? req.user?.id || null : null;
 
-  const result = await service.listRequests({ page, pageSize, status, q, type });
+  const result = await service.listRequests({ page, pageSize, status, q, type, requester_id });
 
   await logAction({
     user_id: req.user?.id || null,
@@ -160,12 +163,14 @@ exports.createRequest = asyncHandler(async (req, res) => {
 
     // ✉️ Notificación por correo
     try {
+      const requestCode = result.request.type_code || "";
+      const clientLabel = payload?.nombre_cliente || null;
       await sendMail({
         to: user.email,
-        subject: `Solicitud creada #${result.request.id}`,
+        subject: `Solicitud creada${requestCode ? ` ${requestCode}` : ""}${clientLabel ? ` - ${clientLabel}` : ""}`,
         html: `
           <h2>Solicitud creada correctamente</h2>
-          <p>Se generó la solicitud <b>#${result.request.id}</b> (${result.request.status})</p>
+          <p>Se generó la solicitud <b>${requestCode || ""}${clientLabel ? ` - ${clientLabel}` : ""}</b> (${result.request.status})</p>
           ${result.document?.id
             ? `<p>Documento asociado: 
                   <a href="https://drive.google.com/file/d/${result.document.id}/view" target="_blank">
@@ -242,6 +247,14 @@ exports.getDetail = asyncHandler(async (req, res) => {
       message: "Solicitud no encontrada",
     });
 
+  const roleName = String(req.user?.role || req.user?.role_name || "").trim().toLowerCase();
+  if (roleName === "jefe_financiero" && String(data.request?.type_code || "").toUpperCase() !== "F.VE-02") {
+    return res.status(403).json({
+      ok: false,
+      message: "Jefe Financiero solo puede consultar solicitudes de credito.",
+    });
+  }
+
   await logAction({
     user_id: req.user?.id || null,
     module: "requests",
@@ -288,6 +301,62 @@ exports.cancel = asyncHandler(async (req, res) => {
     res.status(400).json({
       ok: false,
       message: error.message,
+    });
+  }
+});
+
+// ============================================================
+// 📋 Registrar resultado F.ST-07 (inspecciones independientes)
+// ============================================================
+exports.processCreditDecision = asyncHandler(async (req, res) => {
+  const user = req.user;
+  const id = parseInt(req.params.id, 10);
+  const { action, payload } = req.body || {};
+
+  try {
+    const result = await service.processCreditRequestDecision({
+      id,
+      user,
+      action,
+      payload: payload || {},
+    });
+
+    await logAction({
+      user_id: user.id,
+      module: "requests",
+      action: action === "approve" ? "credit_approve" : "credit_reject",
+      entity: "requests",
+      entity_id: id,
+      details: payload || {},
+    });
+
+    res.json({
+      ok: true,
+      message: action === "approve"
+        ? "Solicitud de credito aprobada correctamente"
+        : "Solicitud de credito rechazada correctamente",
+      data: result,
+    });
+  } catch (error) {
+    logger.error({ error: error.message, requestId: id }, "Error resolviendo solicitud de credito");
+    res.status(error.status || 400).json({
+      ok: false,
+      message: error.message || "No se pudo resolver la solicitud de credito",
+    });
+  }
+});
+
+exports.registerInspectionResult = asyncHandler(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const result = await service.registerIndependentInspectionResult(id, req.body || {}, req.user);
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    logger.error({ error: error.message }, "❌ Error registrando resultado F.ST-07");
+    res.status(error.status || 500).json({
+      ok: false,
+      message: error.message || "No se pudo registrar el resultado de la inspección",
+      code: error.code || null,
     });
   }
 });

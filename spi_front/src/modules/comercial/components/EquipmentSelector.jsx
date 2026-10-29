@@ -1,5 +1,5 @@
 import React from "react";
-import { EQUIPMENT_TYPE_LABELS, ARIA_LABELS } from "./EquipmentPurchaseWidget.constants";
+import { ARIA_LABELS } from "./EquipmentPurchaseWidget.constants";
 
 /**
  * EquipmentSelector Component
@@ -60,7 +60,7 @@ const EquipmentSelector = ({
  * Individual equipment selection item
  */
 const EquipmentItem = ({ equipment, selected, onToggle, onUpdateType }) => {
- const { id, name, sku, serial, status } = equipment;
+ const { name, sku, serial, status } = equipment;
 
  return (
  <div

@@ -71,7 +71,11 @@ async function getRequests(req, res) {
 async function getRequestById(req, res) {
     try {
         const { id } = req.params;
-        const request = await personnelRequestsService.getPersonnelRequestById(id);
+        const request = await personnelRequestsService.getPersonnelRequestById(
+            id,
+            req.user?.id,
+            req.user?.role || req.user?.role_name || null
+        );
 
         if (!request) {
             return res.status(404).json({
@@ -101,7 +105,12 @@ async function getRequestWorkspace(req, res) {
             page: parseInt(req.query.page, 10) || 1,
             pageSize: parseInt(req.query.pageSize, 10) || 25,
         };
-        const workspace = await personnelRequestsService.getPersonnelRequestWorkspace(id, filters);
+        const workspace = await personnelRequestsService.getPersonnelRequestWorkspace(
+            id,
+            filters,
+            req.user?.id,
+            req.user?.role || req.user?.role_name || null
+        );
 
         res.json({
             success: true,
@@ -124,7 +133,12 @@ async function getRequestApplicants(req, res) {
             page: parseInt(req.query.page, 10) || 1,
             pageSize: parseInt(req.query.pageSize, 10) || 25,
         };
-        const result = await personnelRequestsService.getPersonnelRequestApplicants(id, filters);
+        const result = await personnelRequestsService.getPersonnelRequestApplicants(
+            id,
+            filters,
+            req.user?.id,
+            req.user?.role || req.user?.role_name || null
+        );
 
         res.json({
             success: true,
@@ -318,6 +332,23 @@ async function linkCollaborator(req, res) {
     }
 }
 
+async function linkRequester(req, res) {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const { requester_id } = req.body || {};
+        const result = await personnelRequestsService.updatePersonnelRequestRequester(
+            id,
+            requester_id,
+            req.user?.id
+        );
+        res.json({ success: true, data: result });
+    } catch (error) {
+        logger.error('Error reasignando solicitante:', error);
+        const statusCode = error?.statusCode || 400;
+        res.status(statusCode).json({ success: false, message: error.message || 'Error al reasignar solicitante' });
+    }
+}
+
 /**
  * Vincular postulante a solicitud
  */
@@ -368,6 +399,7 @@ module.exports = {
     updatePersonnelProfile,
     uploadPersonnelDocument,
     linkCollaborator,
+    linkRequester,
     linkApplicant,
     hireApplicant
 };

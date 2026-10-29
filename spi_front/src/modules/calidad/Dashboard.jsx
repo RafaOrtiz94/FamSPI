@@ -25,6 +25,7 @@ const calidadModules = [
   { id: "ca0115", title: "Auditorías", subtitle: "Auditorías", icon: FiSearch, path: "/dashboard/calidad/auditorias" },
   { id: "ca0116", title: "Muestreo", subtitle: "Muestreo y aprobación", icon: FiPackage, path: "/dashboard/calidad/muestreo" },
   { id: "ca0117", title: "Tecnovigilancia", subtitle: "Tecnovigilancia", icon: FiHeart, path: "/dashboard/calidad/tecnovigilancia" },
+  { id: "rrhh-docs", title: "Documentos RRHH", subtitle: "Consulta de solo lectura", icon: FiFileText, path: "/dashboard/calidad/documentos-rrhh" },
 ];
 
 const DashboardCalidad = () => {
@@ -120,7 +121,7 @@ const DashboardCalidad = () => {
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {calidadModules.slice(16, 17).map((mod) => {
+        {calidadModules.slice(16).map((mod) => {
           const Icon = mod.icon;
           return (
             <Card key={mod.id} className="p-4 flex items-center gap-3 border border-gray-200 cursor-pointer hover:border-blue-300 hover:shadow-md transition-all" onClick={() => handleModuleClick(mod.path)}>

@@ -1,0 +1,12 @@
+const express = require("express"); const router = express.Router(); const { verifyToken } = require("../../middlewares/auth"); const { requireRole } = require("../../middlewares/roles"); const ctrl = require("./ca0108.controller");
+router.use(verifyToken);
+router.post("/power-outage", requireRole(["calidad", "gerencia"]), ctrl.createPowerOutage);
+router.get("/power-outage", requireRole(["calidad", "gerencia"]), ctrl.listPowerOutage);
+router.post("/dry-ice", requireRole(["calidad", "gerencia"]), ctrl.createDryIceCalc);
+router.get("/dry-ice", requireRole(["calidad", "gerencia"]), ctrl.listDryIceCalc);
+router.post("/transfer", requireRole(["calidad", "gerencia"]), ctrl.createTransfer);
+router.get("/transfer", requireRole(["calidad", "gerencia"]), ctrl.listTransfer);
+router.post("/validation", requireRole(["calidad", "gerencia"]), ctrl.createValidation);
+router.get("/validation", requireRole(["calidad", "gerencia"]), ctrl.listValidation);
+router.put("/workflows/transition", requireRole(["calidad"]), ctrl.transitionRecord);
+module.exports = router;

@@ -4,143 +4,109 @@ import { motion } from "framer-motion";
 import { FiLoader } from "react-icons/fi";
 import { handleGoogleCallback } from "../../../core/api/authApi";
 import { useAuth } from "../../../core/auth/AuthContext";
-import { clockIn, getTodayAttendance } from "../../../core/api/attendanceApi";
 
-const getLocalDateKey = (date = new Date()) => {
- const year = date.getFullYear();
- const month = String(date.getMonth() + 1).padStart(2, "0");
- const day = String(date.getDate()).padStart(2, "0");
- return `${year}-${month}-${day}`;
-};
-
-/**
- * LoginCallback.jsx
- * ------------------------------------------------------------
- * - Procesa el fragmento (#accessToken & refreshToken)
- * - Guarda tokens y actualiza el contexto global
- * - Redirige automáticamente al dashboard según el rol
- * - Verifica si el usuario tiene firma registrada
- */
 const LoginCallback = () => {
  const navigate = useNavigate();
- const { refresh } = useAuth();
+ const { refresh, bootstrapSessionFromToken } = useAuth();
 
  useEffect(() => {
- let processed = false;
+  let processed = false;
 
- const processCallback = async () => {
- if (processed) return;
- processed = true;
+  const processCallback = async () => {
+   if (processed) return;
+   processed = true;
 
- try {
- const hash = window.location.hash;
- if (!hash) throw new Error("No se encontró información de tokens.");
+   try {
+    const hash = window.location.hash;
+    if (!hash) throw new Error("No se encontro informacion de tokens.");
 
- const { accessToken, refreshToken } = handleGoogleCallback(hash);
+    const { accessToken, refreshToken } = handleGoogleCallback(hash);
+    if (!accessToken || !refreshToken) {
+      throw new Error("Tokens invalidos o incompletos.");
+    }
 
- if (!accessToken || !refreshToken) {
- throw new Error("Tokens inválidos o incompletos.");
- }
+    const bootstrappedUser = bootstrapSessionFromToken?.(accessToken);
+    if (!bootstrappedUser) {
+     throw new Error("No se pudo hidratar la sesion inicial.");
+    }
 
- console.log("✅ Tokens recibidos y guardados en localStorage.");
- console.log("🔑 Access:", accessToken.slice(0, 15) + "...");
+    window.history.replaceState(null, "", window.location.pathname);
 
- // 2️⃣ Refrescar el contexto (esto actualiza el 'user' global)
- const ok = await refresh();
- if (!ok) throw new Error("No se pudo sincronizar sesión.");
+    const role = (bootstrappedUser.role || "pendiente").toLowerCase();
+    const scope = (bootstrappedUser.scope || role).toLowerCase();
+    const isPendingRole =
+      !role ||
+      role === "pendiente" ||
+      role === "pending" ||
+      scope === "pendiente" ||
+      scope === "pending";
 
- const stored = JSON.parse(localStorage.getItem("user") || "{}");
+    const roleRoutes = {
+     gerencia: "/dashboard/gerencia",
+     gerencia_general: "/dashboard/gerencia",
+     gerente_general: "/dashboard/gerencia",
+     director: "/dashboard/gerencia",
+     finanzas: "/dashboard/finanzas",
+     jefe_finanzas: "/dashboard/finanzas",
+     jefe_financiero: "/dashboard/finanzas",
+     financiero: "/dashboard/finanzas",
+     comercial: "/dashboard/comercial",
+     jefe_comercial: "/dashboard/comercial",
+     backoffice_comercial: "/dashboard/comercial",
+     acp_comercial: "/dashboard/comercial",
+     analista_comercial: "/dashboard/comercial",
+     servicio_tecnico: "/dashboard/servicio-tecnico",
+     "servicio-tecnico": "/dashboard/servicio-tecnico",
+     jefe_servicio_tecnico: "/dashboard/servicio-tecnico",
+     tecnico: "/dashboard/servicio-tecnico",
+     talento_humano: "/dashboard/talento-humano",
+     "talento-humano": "/dashboard/talento-humano",
+     jefe_talento_humano: "/dashboard/talento-humano",
+     ti: "/dashboard/ti",
+     jefe_ti: "/dashboard/ti",
+     operaciones: "/dashboard/operaciones",
+     jefe_operaciones: "/dashboard/operaciones",
+     calidad: "/dashboard/calidad",
+     jefe_calidad: "/dashboard/calidad",
+    };
 
- try {
- const todayKey = getLocalDateKey(new Date());
- const attendanceSyncKey = `attendance-login-sync:${stored?.id || stored?.email || "anon"}:${todayKey}`;
- const attendance = await getTodayAttendance();
- if (attendance?.data?.entry_time) {
- sessionStorage.setItem(attendanceSyncKey, "done");
- } else if (!sessionStorage.getItem(attendanceSyncKey)) {
- await clockIn(null);
- sessionStorage.setItem(attendanceSyncKey, "done");
- }
- } catch (attendanceErr) {
- console.warn("No se pudo garantizar la entrada automatica en login:", attendanceErr?.message || attendanceErr);
- }
- window.history.replaceState(null, "", window.location.pathname);
+    const target =
+      sessionStorage.getItem("redirectTo") ||
+      (isPendingRole
+       ? "/registro-en-proceso"
+       : bootstrappedUser.dashboard || roleRoutes[role] || roleRoutes[scope] || "/unauthorized");
+    sessionStorage.removeItem("redirectTo");
 
- // Acceder al usuario directamente desde AuthContext
+    void refresh().catch((syncError) => {
+     console.warn("La sincronizacion completa del perfil fallo tras el login:", syncError);
+    });
 
- // Check if user has signature - redirect to signature page if not
- if (!stored.has_signature) {
- console.log("⚠️ Usuario sin firma registrada, redirigiendo a captura de firma");
- navigate("/first-login-signature", { replace: true });
- return;
- }
+    navigate(target, { replace: true });
+   } catch (err) {
+    console.error("Error procesando callback:", err);
+    navigate("/login?error=auth_failed", { replace: true });
+   }
+  };
 
- const role = (stored.role || "pendiente").toLowerCase();
- const scope = (stored.scope || role).toLowerCase();
- const isPendingRole = !role || role === "pendiente" || role === "pending" || scope === "pendiente" || scope === "pending";
-
- const roleRoutes = {
- gerencia: "/dashboard/gerencia",
- gerencia_general: "/dashboard/gerencia",
- gerente_general: "/dashboard/gerencia",
- director: "/dashboard/gerencia",
- finanzas: "/dashboard/finanzas",
- jefe_finanzas: "/dashboard/finanzas",
- jefe_financiero: "/dashboard/finanzas",
- financiero: "/dashboard/finanzas",
- comercial: "/dashboard/comercial",
- jefe_comercial: "/dashboard/comercial",
- backoffice_comercial: "/dashboard/comercial",
- acp_comercial: "/dashboard/comercial",
- analista_comercial: "/dashboard/comercial",
- servicio_tecnico: "/dashboard/servicio-tecnico",
- "servicio-tecnico": "/dashboard/servicio-tecnico",
- jefe_servicio_tecnico: "/dashboard/servicio-tecnico",
- tecnico: "/dashboard/servicio-tecnico",
- talento_humano: "/dashboard/talento-humano",
- "talento-humano": "/dashboard/talento-humano",
- jefe_talento_humano: "/dashboard/talento-humano",
- ti: "/dashboard/ti",
- jefe_ti: "/dashboard/ti",
- operaciones: "/dashboard/operaciones",
- jefe_operaciones: "/dashboard/operaciones",
- calidad: "/dashboard/calidad",
- jefe_calidad: "/dashboard/calidad",
- };
-
- const target = sessionStorage.getItem("redirectTo") || (isPendingRole
- ? "/registro-en-proceso"
- : stored.dashboard || roleRoutes[role] || roleRoutes[scope] || "/unauthorized");
- sessionStorage.removeItem("redirectTo");
- console.log(`🚀 Redirigiendo a: ${target}`);
- navigate(target, { replace: true });
- } catch (err) {
- console.error("❌ Error procesando callback:", err);
- navigate("/login?error=auth_failed", { replace: true });
- }
- };
-
- processCallback();
- // eslint-disable-next-line react-hooks/exhaustive-deps
- }, []);
+  processCallback();
+ }, [bootstrapSessionFromToken, navigate, refresh]);
 
  return (
- <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-200">
- <motion.div
- initial={{ opacity: 0, scale: 0.9 }}
- animate={{ opacity: 1, scale: 1 }}
- transition={{ duration: 0.5 }}
- className="text-center"
- >
- <FiLoader className="animate-spin text-blue-600 dark:text-blue-400 text-4xl mx-auto mb-4" />
- <h1 className="text-lg font-semibold">Procesando inicio de sesión...</h1>
- <p className="text-sm text-gray-500 dark:text-gray-400">
- Por favor espera un momento.
- </p>
- </motion.div>
- </div>
+  <div className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-700 dark:bg-gray-900 dark:text-gray-200">
+   <motion.div
+    initial={{ opacity: 0, scale: 0.9 }}
+    animate={{ opacity: 1, scale: 1 }}
+    transition={{ duration: 0.5 }}
+    className="text-center"
+   >
+    <FiLoader className="mx-auto mb-4 animate-spin text-4xl text-blue-600 dark:text-blue-400" />
+    <h1 className="text-lg font-semibold">Procesando inicio de sesion...</h1>
+    <p className="text-sm text-gray-500 dark:text-gray-400">
+     Por favor espera un momento.
+    </p>
+   </motion.div>
+  </div>
  );
 };
 
 export default LoginCallback;
-

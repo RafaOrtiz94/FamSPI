@@ -27,7 +27,37 @@ export const getApplicantById = async (id) => {
  return data;
 };
 
-export default {
+export const syncApplicantsFromSheet = async () => {
+ const { data } = await axios.post(
+ `${resolveApplicantsBase()}/sync-from-sheet`,
+ {},
+ { headers: getAuthHeaders() },
+ );
+ return data;
+};
+
+export const getOrphanApplicants = async () => {
+ const { data } = await axios.get(`${resolveApplicantsBase()}/orphans`, {
+ headers: getAuthHeaders(),
+ });
+ return data;
+};
+
+export const linkApplicantToRequest = async (applicantId, personnelRequestId) => {
+ const { data } = await axios.patch(
+ `${resolveApplicantsBase()}/${applicantId}/personnel-request`,
+ { personnel_request_id: personnelRequestId },
+ { headers: getAuthHeaders() },
+ );
+ return data;
+};
+
+const applicantsApi = {
  getApplicants,
  getApplicantById,
+ syncApplicantsFromSheet,
+ getOrphanApplicants,
+ linkApplicantToRequest,
 };
+
+export default applicantsApi;

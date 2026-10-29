@@ -125,3 +125,4 @@ La deteccion fuera de horario debe evaluarse con zona horaria `America/Guayaquil
 - Notificaciones (alertas fuera de horario).
 - Auditoria (registro de acciones de login/seguridad).
 - Documentos (carga de firma/PDF LOPDP en Drive).
+<!--  -->

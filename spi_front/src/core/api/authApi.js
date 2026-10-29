@@ -87,12 +87,14 @@ export const logout = async () => {
 /* ==========================================================
  🧭 Perfil actual (/auth/me)
  ========================================================== */
-export const getProfile = async () => {
+export const getProfile = async (options = {}) => {
  const token = getAccessToken();
  if (!token) throw new Error("No hay token activo");
+ const params = options?.lite ? { lite: "1" } : undefined;
 
  const { data } = await api.get("/auth/me", {
  headers: { Authorization: `Bearer ${token}` },
+ params,
  });
 
  if (!data?.user) throw new Error("Usuario no encontrado");
@@ -156,3 +158,30 @@ export const submitInternalLopdpConsent = async ({
 
 // Alias for consistency
 export const acceptInternalLopdp = submitInternalLopdpConsent;
+
+/* ==========================================================
+ 🧪 Login sandbox (solo cuando REACT_APP_SANDBOX_AUTH=true)
+ ========================================================== */
+export const sandboxLogin = async (email, password) => {
+  const { data } = await api.post("/auth/local", { email, password });
+  if (!data?.ok) throw new Error(data?.message || "Credenciales incorrectas");
+  setTokens(data.accessToken, data.refreshToken);
+  return data;
+};
+
+/* ==========================================================
+ 🎓 Login local de produccion (pasantes, sin OAuth)
+ Ver docs/plans/pasantes-access-plan.md
+ ========================================================== */
+export const localLogin = async (username, password) => {
+  const { data } = await api.post("/auth/local-login", { username, password });
+  if (!data?.ok) throw new Error(data?.message || "Credenciales incorrectas");
+  setTokens(data.accessToken, data.refreshToken);
+  return data;
+};
+
+export const changePassword = async ({ currentPassword, newPassword }) => {
+  const { data } = await api.post("/auth/change-password", { currentPassword, newPassword });
+  if (!data?.ok) throw new Error(data?.message || "No se pudo cambiar la contraseña");
+  return data;
+};

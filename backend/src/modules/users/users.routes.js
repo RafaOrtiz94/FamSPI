@@ -19,6 +19,7 @@ const ALLOWED_USER_ROLES = new Set([
   "jefe_comercial",
   "servicio_tecnico",
   "tecnico",
+  "responsable_tecnico",
   "jefe_servicio_tecnico",
   "jefe_tecnico",
   "finanzas",
@@ -38,6 +39,7 @@ const ALLOWED_USER_ROLES = new Set([
   "usuario",
   "admin",
   "administrador",
+  "pasante",
 ]);
 
 const USER_ADMIN_ROLES = [
@@ -63,9 +65,22 @@ const USER_DIRECTORY_ROLES = [
   "jefe_comercial",
   "backoffice_comercial",
   "acp_comercial",
+  // jefe_servicio necesita el directorio para asignar tecnico/esp_app al
+  // coordinar inspecciones de ambiente desde Solicitudes.
+  "jefe_servicio",
+  // jefe_operaciones necesita el directorio para elegir el asesor al asignar clientes
+  // (Clientes.jsx#loadAdvisors -> GET /users).
+  "jefe_operaciones",
+  "jefe_de_operaciones",
 ];
 
 // Todas las rutas requieren autenticación
+const allowSignerDirectoryLookup = (req, res, next) => {
+  const forSigners = req.query?.for_signers === "true" || req.query?.for_signers === "1";
+  if (forSigners) return next();
+  return requireRole(USER_DIRECTORY_ROLES)(req, res, next);
+};
+
 router.use(verifyToken);
 
 // Catálogo de roles (para selects del frontend)
@@ -80,7 +95,7 @@ router.get("/roles", requireRole(USER_DIRECTORY_ROLES), (req, res) => {
 });
 
 // CRUD Usuarios
-router.get("/", requireRole(USER_DIRECTORY_ROLES), controller.getUsers);
+router.get("/", allowSignerDirectoryLookup, controller.getUsers);
 router.get("/:id", requireRole(USER_ADMIN_ROLES), controller.getUserById);
 router.post("/", requireRole(USER_ADMIN_ROLES), controller.createUser);
 router.put("/:id", requireRole(USER_ADMIN_ROLES), controller.updateUser);

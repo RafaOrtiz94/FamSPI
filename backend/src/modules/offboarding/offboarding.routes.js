@@ -21,6 +21,7 @@ router.use(requireRole(OFFBOARDING_ALLOWED_ROLES));
 router.get("/:userId/workspace", controller.getWorkspace);
 router.patch("/:userId/tasks/:taskKey", controller.updateTask);
 router.post("/:userId/start", controller.startOffboarding);
+router.post("/:userId/cancel", controller.cancelOffboarding);
 router.post("/:userId/liquidation", controller.runLiquidation);
 router.post("/:userId/close", controller.closeOffboarding);
 

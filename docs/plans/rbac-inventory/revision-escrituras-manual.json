@@ -1,0 +1,194 @@
+{
+  "PUT /api/v1/attendance/admin/late-justification/:id": {
+    "verdict": "valida rol",
+    "note": "El controlador exige hasHrDashboardAccess y responde 403. Revisado 2026-10-07."
+  },
+  "POST /api/v1/attendance/birthday-benefit/:token/evidence": {
+    "verdict": "valida propiedad",
+    "note": "El servicio aplica assertCanAccessOwnBenefit: solo el dueno del beneficio o quien administra cumpleanos. Revisado 2026-10-07."
+  },
+  "POST /api/v1/attendance/birthday-benefit/:token/redeem": {
+    "verdict": "valida propiedad",
+    "note": "El servicio aplica assertCanAccessOwnBenefit. Revisado 2026-10-07."
+  },
+  "PATCH /api/v1/audit-prep/documents/:id/status": {
+    "verdict": "valida rol",
+    "note": "El servicio aplica assertAllowedSection contra los roles permitidos de la seccion. Revisado 2026-10-07."
+  },
+  "POST /api/v1/audit-prep/documents/upload": {
+    "verdict": "valida rol",
+    "note": "El servicio aplica assertAllowedSection. Revisado 2026-10-07."
+  },
+  "POST /api/v1/auth/logout": {
+    "verdict": "no aplica",
+    "note": "Cierra la sesion del propio token; no requiere rol. Revisado 2026-10-07."
+  },
+  "POST /api/v1/clients/:id/visit-status": {
+    "verdict": "valida propiedad",
+    "note": "El servicio responde 403 si el cliente no fue creado por el usuario ni le esta asignado. Revisado 2026-10-07."
+  },
+  "POST /api/v1/clients/prospect-visit": {
+    "verdict": "limitado al propio usuario",
+    "note": "Crea o actualiza solo visitas cuyo user_email es el del usuario. Revisado 2026-10-07."
+  },
+  "POST /api/v1/permisos": {
+    "verdict": "limitado al propio usuario",
+    "note": "Crea la solicitud a nombre del usuario y aplica assertRequesterCanCreateTimeOff. Revisado 2026-10-07."
+  },
+  "POST /api/v1/permisos/:id/cancelar": {
+    "verdict": "valida propiedad",
+    "note": "Solo el solicitante o su aprobador; en otro caso 403. Revisado 2026-10-07."
+  },
+  "POST /api/v1/permisos/:id/cancelar/revisar": {
+    "verdict": "valida rol",
+    "note": "Solo el aprobador asignado o quien pueda aprobar; en otro caso 403. Revisado 2026-10-07."
+  },
+  "POST /api/v1/permisos/:id/recovery-plan": {
+    "verdict": "valida propiedad",
+    "note": "Solo el solicitante o el aprobador. Revisado 2026-10-07."
+  },
+  "POST /api/v1/permisos/:id/regularizar": {
+    "verdict": "valida rol",
+    "note": "Solo Talento Humano o administracion; en otro caso 403. Revisado 2026-10-07."
+  },
+  "POST /api/v1/permisos/:id/regularizar/convertir-vacaciones": {
+    "verdict": "deshabilitado",
+    "note": "La funcion siempre responde 409: la conversion a vacaciones esta apagada. Revisado 2026-10-07."
+  },
+  "POST /api/v1/permisos/estudios/matricula": {
+    "verdict": "limitado al propio usuario",
+    "note": "Registra la matricula del propio usuario. Revisado 2026-10-07."
+  },
+  "POST /api/v1/signature-workflows": {
+    "verdict": "abierto por diseno",
+    "note": "Cualquier usuario autenticado puede crear un flujo de firma; queda como su creador. Confirmar con el responsable si debe restringirse. Revisado 2026-10-07."
+  },
+  "POST /api/v1/signature-workflows/:id/cancel": {
+    "verdict": "valida propiedad",
+    "note": "ensureCanManageWorkflow: solo el creador o un administrador. Revisado 2026-10-07."
+  },
+  "POST /api/v1/signature-workflows/:id/send": {
+    "verdict": "valida propiedad",
+    "note": "ensureCanManageWorkflow. Revisado 2026-10-07."
+  },
+  "POST /api/v1/signature-workflows/:id/signers/:signerId/correct-placement": {
+    "verdict": "valida propiedad",
+    "note": "ensureCanViewWorkflow, ensureSignerOwnership y ensureCanManageWorkflow. Revisado 2026-10-07."
+  },
+  "POST /api/v1/signature-workflows/:id/signers/:signerId/open": {
+    "verdict": "valida propiedad",
+    "note": "ensureCanViewWorkflow y ensureSignerOwnership: solo el firmante de ese paso. Revisado 2026-10-07."
+  },
+  "POST /api/v1/signature-workflows/:id/signers/:signerId/reject": {
+    "verdict": "valida propiedad",
+    "note": "ensureCanViewWorkflow y ensureSignerOwnership. Revisado 2026-10-07."
+  },
+  "POST /api/v1/signature-workflows/:id/signers/:signerId/sign": {
+    "verdict": "valida propiedad",
+    "note": "ensureCanViewWorkflow y ensureSignerOwnership: nadie firma por otro. Revisado 2026-10-07."
+  },
+  "POST /api/v1/signature-workflows/validate-signer-profiles": {
+    "verdict": "HALLAZGO: sin control",
+    "note": "Cualquier usuario autenticado puede enviar una lista de IDs y recibir correo, nombre completo y que datos de perfil le faltan a cada uno (nombres, apellidos, cedula, cargo). No valida rol ni relacion con esos usuarios. Severidad baja: expone datos de perfil incompletos. Revisado 2026-10-07."
+  },
+  "POST /api/v1/suggestion-box/submissions": {
+    "verdict": "abierto por diseno",
+    "note": "Buzon de sugerencias: cualquier usuario interno puede enviar. Revisado 2026-10-07."
+  },
+  "POST /api/v1/support-tickets/:id/comments": {
+    "verdict": "valida propiedad",
+    "note": "Solo el solicitante, el tecnico asignado o TI; en otro caso 403. Revisado 2026-10-07."
+  },
+  "POST /api/v1/support-tickets/:id/reopen": {
+    "verdict": "valida propiedad",
+    "note": "Solo el dueno del ticket o TI; en otro caso 403. Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/boards/:boardId/groups": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "DELETE /api/v1/work-management/checklist-items/:checklistItemId": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "PATCH /api/v1/work-management/checklist-items/:checklistItemId": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/groups/:groupId/items": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "DELETE /api/v1/work-management/items/:itemId": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "PATCH /api/v1/work-management/items/:itemId": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "PUT /api/v1/work-management/items/:itemId/assignees": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/items/:itemId/attachments": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/items/:itemId/checklist-items": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/items/:itemId/comments": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/items/:itemId/reorder": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/items/:itemId/supporters": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "DELETE /api/v1/work-management/items/:itemId/supporters/:supporterUserId": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "DELETE /api/v1/work-management/projects/:projectId": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/projects/:projectId/boards": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/projects/from-opportunity/:opportunityId": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/workspaces": {
+    "verdict": "abierto por diseno",
+    "note": "Cualquier usuario autenticado puede crear un espacio de trabajo y queda como su dueno. Confirmar con el responsable. Revisado 2026-10-07."
+  },
+  "DELETE /api/v1/work-management/workspaces/:workspaceId": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "PATCH /api/v1/work-management/workspaces/:workspaceId": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/workspaces/:workspaceId/members": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "DELETE /api/v1/work-management/workspaces/:workspaceId/members/:memberUserId": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  },
+  "POST /api/v1/work-management/workspaces/:workspaceId/projects": {
+    "verdict": "valida pertenencia",
+    "note": "El servicio exige ser miembro, dueno o gestor del espacio/proyecto/item (assert...Access, 403 en otro caso). Revisado 2026-10-07."
+  }
+}

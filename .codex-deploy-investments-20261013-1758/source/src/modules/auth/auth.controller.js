@@ -1,0 +1,1195 @@
+/**
+ * src/modules/auth/auth.controller.js
+ * ------------------------------------
+ * 🔐 Autenticación Google OAuth2 → JWT Header-Based
+ * - Tokens: accessToken (configurable), refreshToken (configurable)
+ * - Frontend: recibe tokens vía fragment #accessToken=&refreshToken=
+ * - Endpoints:
+ *    /auth/google        → Redirige a Google OAuth
+ *    /auth/callback      → Recibe code, genera tokens, redirige al frontend
+ *    /auth/me            → Retorna usuario actual (JWT Bearer)
+ *    /auth/refresh       → Genera nuevos tokens
+ *    /auth/logout        → Cierra sesión activa
+ *    /auth/sessions      → Auditoría de sesiones
+ *    /auth/active-users  → Usuarios activos
+ */
+
+const { oauth2Client, google } = require("../../config/oauth");
+const db = require("../../config/db");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+const logger = require("../../config/logger");
+const { ensureFolder, uploadBase64File } = require("../../utils/drive");
+const {
+  createSession,
+  updateSessionRefreshToken,
+  closeSessionsByEmail,
+  closeSessionByRefreshToken,
+} = require("./session.repository");
+const { isOffHours } = require("../../utils/offHoursPolicy");
+const { getGeoLocation } = require("../../utils/geoip");
+const { notifyTIAboutOffHoursLogin } = require("../../modules/notifications/notifications.service");
+const { logAction } = require("../../utils/audit");
+const { findExistingUserByIdentity } = require("../../utils/userIdentity");
+const { ensureDailyClockIn } = require("../attendance/attendance.utils");
+const { getCatalog, listUserModuleAccess, getGlobalModuleStatusForUser } = require("../module-access/moduleAccess.service");
+const {
+  AUTHORIZATION_MANIFEST_VERSION,
+  listPermissionsForUser,
+} = require("../../security/authorization/authorization");
+// Use crypto.randomUUID() (Node.js 18+ native)
+const { randomUUID } = require('crypto');
+const LOGIN_ATTENDANCE_SYNC_ENABLED = process.env.AUTH_ENABLE_LOGIN_CLOCK_IN !== "false";
+
+const SCOPES = ["profile", "email"];
+const ROLE_META = {
+  gerencia: { scope: "gerencia", dashboard: "/dashboard/gerencia" },
+  gerente_general: { scope: "gerencia", dashboard: "/dashboard/gerencia" },
+  director: { scope: "gerencia", dashboard: "/dashboard/gerencia" },
+  finanzas: { scope: "finanzas", dashboard: "/dashboard/finanzas" },
+  jefe_finanzas: { scope: "finanzas", dashboard: "/dashboard/finanzas" },
+  jefe_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
+  backoffice_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
+  acp_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
+  analista_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
+  comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
+  servicio_tecnico: {
+    scope: "servicio_tecnico",
+    dashboard: "/dashboard/servicio-tecnico",
+  },
+  tecnico: { scope: "servicio_tecnico", dashboard: "/dashboard/servicio-tecnico" },
+  jefe_servicio_tecnico: {
+    scope: "servicio_tecnico",
+    dashboard: "/dashboard/servicio-tecnico",
+  },
+  jefe_tecnico: {
+    scope: "servicio_tecnico",
+    dashboard: "/dashboard/servicio-tecnico",
+  },
+  operaciones: { scope: "operaciones", dashboard: "/dashboard/operaciones" },
+  jefe_operaciones: { scope: "operaciones", dashboard: "/dashboard/operaciones" },
+  calidad: { scope: "calidad", dashboard: "/dashboard/calidad" },
+  jefe_calidad: { scope: "calidad", dashboard: "/dashboard/calidad" },
+  ti: { scope: "ti", dashboard: "/dashboard/ti" },
+  jefe_ti: { scope: "ti", dashboard: "/dashboard/ti" },
+  talento_humano: {
+    scope: "talento_humano",
+    dashboard: "/dashboard/talento-humano",
+  },
+  jefe_talento_humano: {
+    scope: "talento_humano",
+    dashboard: "/dashboard/talento-humano",
+  },
+  administrador: { scope: "admin", dashboard: "/dashboard/gerencia" },
+  pending: { scope: "pending", dashboard: "/registro-en-proceso" },
+  pendiente: { scope: "pending", dashboard: "/registro-en-proceso" },
+  pasante: { scope: "pasante", dashboard: "/dashboard/pasante" },
+};
+const resolveRoleMeta = (role) => {
+  const key = (role || "pendiente").toLowerCase();
+  return (
+    ROLE_META[key] || {
+      scope: key,
+      dashboard: "/dashboard",
+    }
+  );
+};
+const rawFrontendUrl = process.env.FRONTEND_URL || "http://localhost:3001";
+const FRONTEND_URL = rawFrontendUrl.replace(/\/$/, "");
+if (!process.env.FRONTEND_URL) {
+  logger.warn(
+    "⚠️ FRONTEND_URL no está definido en .env; usando %s como valor por defecto",
+    FRONTEND_URL
+  );
+}
+
+// 🔍 Debug logging for OAuth URL configuration
+if (process.env.NODE_ENV !== 'production') {
+  logger.info('🔧 OAuth URL Configuration Debug:', {
+    NODE_ENV: process.env.NODE_ENV,
+    FRONTEND_URL,
+    GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI,
+    isProd: process.env.NODE_ENV === 'production'
+  });
+}
+const isProd = process.env.NODE_ENV === "production";
+const ACCESS_TOKEN_BUSINESS_DAYS = Number.parseInt(
+  String(process.env.ACCESS_TOKEN_BUSINESS_DAYS || "5").trim(),
+  10
+);
+const REFRESH_TOKEN_EXPIRES_IN = String(process.env.REFRESH_TOKEN_EXPIRES_IN || "30d").trim();
+const GUAYAQUIL_UTC_OFFSET_MINUTES = -5 * 60;
+const buildAuthRequestMeta = (req = {}) => ({
+  method: req.method || null,
+  path: req.originalUrl || req.url || null,
+  appPath: req.headers?.["x-app-path"] || null,
+  ip: req.headers?.["x-forwarded-for"]?.split(",")[0] || req.socket?.remoteAddress || req.ip || null,
+  userAgent: req.headers?.["user-agent"] || null,
+  referer: req.headers?.referer || null,
+});
+
+/* ============================================================
+   Helpers seguros para firmar tokens
+============================================================ */
+const toGuayaquilLocalDate = (date) =>
+  new Date(date.getTime() + GUAYAQUIL_UTC_OFFSET_MINUTES * 60 * 1000);
+
+const fromGuayaquilLocalDate = (date) =>
+  new Date(date.getTime() - GUAYAQUIL_UTC_OFFSET_MINUTES * 60 * 1000);
+
+// "Dias habiles" se interpreta como lunes a viernes. No hay calendario de
+// feriados corporativos cargado en auth, asi que no se descartan festivos.
+const addBusinessDaysInGuayaquil = (date, businessDays) => {
+  const safeBusinessDays = Number.isInteger(businessDays) && businessDays > 0 ? businessDays : 5;
+  const localDate = toGuayaquilLocalDate(date);
+  let remaining = safeBusinessDays;
+
+  while (remaining > 0) {
+    localDate.setUTCDate(localDate.getUTCDate() + 1);
+    const dayOfWeek = localDate.getUTCDay();
+    if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+      remaining -= 1;
+    }
+  }
+
+  return fromGuayaquilLocalDate(localDate);
+};
+
+const signAccess = (payload) =>
+  jwt.sign(
+    {
+      ...payload,
+      iss: "spi-fam-backend",
+      aud: "spi-fam-frontend",
+      sub: payload.id?.toString(),
+      exp: Math.floor(addBusinessDaysInGuayaquil(new Date(), ACCESS_TOKEN_BUSINESS_DAYS).getTime() / 1000),
+    },
+    process.env.SECRET_KEY
+  );
+
+const signRefresh = (payload) =>
+  jwt.sign(
+    {
+      ...payload,
+      iss: "spi-fam-backend",
+      aud: "spi-fam-frontend",
+      sub: payload.id?.toString(),
+    },
+    process.env.REFRESH_SECRET_KEY,
+    { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
+  );
+
+const INTERNAL_LOPDP_FOLDER = "Aprobaciones LODPD TIC";
+const LOPDP_ROOT_FOLDER = "Consentimientos LOPDP";
+const LOPDP_INTERNAL_FOLDER = "Colaboradores";
+const LOPDP_SIGNATURES_FOLDER = "Firmas";
+const LOPDP_DOCUMENTS_FOLDER = "Documentos";
+
+const syncAttendanceDuringLogin = async (user) => {
+  if (!LOGIN_ATTENDANCE_SYNC_ENABLED) {
+    logger.info("Sincronizacion de asistencia en login deshabilitada por configuracion", {
+      userId: user?.id,
+      email: user?.email,
+    });
+    return { skipped: true };
+  }
+
+  try {
+    const attendanceResult = await ensureDailyClockIn({
+      userId: user.id,
+      location: null,
+      timestamp: new Date(),
+    });
+
+    logger.info("Asistencia sincronizada durante login", {
+      userId: user.id,
+      email: user.email,
+      created: attendanceResult.created,
+      attendanceDate: attendanceResult.date,
+    });
+
+    return { skipped: false, result: attendanceResult };
+  } catch (attendanceErr) {
+    logger.warn("No se pudo registrar asistencia automatica en login: %s", attendanceErr.message, {
+      userId: user?.id,
+      email: user?.email,
+    });
+
+    return { skipped: false, error: attendanceErr };
+  }
+};
+
+const runAsyncLoginTask = (promise, context = {}) => {
+  Promise.resolve(promise).catch((error) => {
+    logger.warn("Tarea asincrona post-login fallo: %s", error?.message, context);
+  });
+};
+
+/* ============================================================
+   1️⃣ Redirigir a Google OAuth
+============================================================ */
+const googleAuthRedirect = (req, res) => {
+  try {
+    const url = oauth2Client.generateAuthUrl({
+      access_type: "offline",
+      scope: SCOPES,
+      include_granted_scopes: true,
+    });
+    logger.info(`🌐 Redirigiendo a Google OAuth: ${url}`);
+    res.redirect(url);
+  } catch (err) {
+    logger.error("❌ Error generando URL de autenticación: %o", err);
+    res.status(500).json({ ok: false, message: "Error iniciando autenticación con Google" });
+  }
+};
+
+/* ============================================================
+   2️⃣ Callback de Google → genera tokens JWT
+============================================================ */
+const googleCallback = async (req, res) => {
+  try {
+    const { code } = req.query;
+    if (!code) {
+      logger.warn("⚠️ No se recibió 'code' en el callback de Google");
+      return res.redirect(`${FRONTEND_URL}/login?error=no_code`);
+    }
+
+    // Intercambiar code por tokens de Google
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+
+    // Obtener datos del usuario
+    const oauth2 = google.oauth2({ version: "v2", auth: oauth2Client });
+    const { data } = await oauth2.userinfo.get();
+
+    if (!data.verified_email) {
+      return res.redirect(`${FRONTEND_URL}/login?error=email_not_verified`);
+    }
+
+    const email = data.email;
+    const googleId = data.id;
+    const fullname = data.name;
+    const domain = data.hd || email.split("@")[1];
+    const allowedDomain = process.env.ALLOWED_DOMAIN;
+
+    if (allowedDomain && domain !== allowedDomain) {
+      logger.warn(`⛔ Dominio no permitido: ${domain}`);
+      const msg = encodeURIComponent(`Solo se permiten cuentas @${allowedDomain}`);
+      return res.redirect(`${FRONTEND_URL}/login?error=${msg}`);
+    }
+
+    // Buscar o crear usuario (prioriza google_id para evitar duplicados)
+    const existingUsers = await db.query(
+      `
+      SELECT id, email, fullname, role, department_id, lopdp_internal_status, google_id, extra_roles
+      FROM users
+      WHERE google_id = $1 OR email = $2
+      ORDER BY CASE WHEN google_id = $1 THEN 0 ELSE 1 END, id ASC
+      `,
+      [googleId, email]
+    );
+    let user;
+
+    const userByGoogle = existingUsers.rows.find((row) => row.google_id === googleId);
+    const userByEmail = existingUsers.rows.find((row) => row.email === email);
+
+    if (userByGoogle) {
+      logger.info("Actualizando usuario por google_id: " + email);
+      const upd = await db.query(
+        `
+        UPDATE users
+        SET email = $1,
+            fullname = COALESCE(NULLIF(fullname, ''), $2),
+            updated_at = NOW(),
+            department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
+            lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
+        WHERE google_id = $3
+        RETURNING id, email, fullname, role, department_id, lopdp_internal_status, extra_roles;
+        `,
+        [email, fullname, googleId, "ti"]
+      );
+      user = upd.rows[0];
+    } else if (userByEmail) {
+      logger.info("Actualizando usuario existente: " + email);
+      const upd = await db.query(
+        `
+        UPDATE users
+        SET google_id = $1,
+            fullname = COALESCE(NULLIF(fullname, ''), $2),
+            updated_at = NOW(),
+            department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
+            lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
+        WHERE email = $3
+        RETURNING id, email, fullname, role, department_id, lopdp_internal_status, extra_roles;
+        `,
+        [googleId, fullname, email, "ti"]
+      );
+      user = upd.rows[0];
+    } else {
+      // Antes de crear una cuenta nueva, se busca si esta persona ya tiene
+      // una cuenta "huerfana" (por ejemplo, creada por hirePersonnelRequest
+      // con email placeholder mientras esperaba su correo corporativo real).
+      // Si existe, se vincula en vez de duplicar: este primer login con
+      // dominio corporativo aporta el correo real y verificado.
+      const existingByIdentity = await findExistingUserByIdentity(db, { fullname });
+      if (existingByIdentity) {
+        logger.info(
+          `Vinculando cuenta existente por nombre (id ${existingByIdentity.id}) en primer login: ${email}`
+        );
+        const upd = await db.query(
+          `
+          UPDATE users
+          SET google_id = $1,
+              email = $2,
+              fullname = COALESCE(NULLIF(fullname, ''), $3),
+              updated_at = NOW(),
+              department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $5 LIMIT 1)),
+              lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
+          WHERE id = $4
+          RETURNING id, email, fullname, role, department_id, lopdp_internal_status, extra_roles;
+          `,
+          [googleId, email, fullname, existingByIdentity.id, "ti"]
+        );
+        user = upd.rows[0];
+      } else {
+        logger.info("Creando nuevo usuario: " + email);
+        const ins = await db.query(
+          `
+          INSERT INTO users (
+            google_id,
+            email,
+            fullname,
+            name,
+            role,
+            department_id,
+            lopdp_internal_status
+          )
+          VALUES ($1, $2, $3, $4, $5, (SELECT id FROM departments WHERE code = $6 LIMIT 1), 'pending')
+          RETURNING id, email, fullname, role, department_id, lopdp_internal_status, extra_roles;
+          `,
+          [googleId, email, fullname, data.given_name || "Usuario", "pendiente", "comercial"]
+        );
+        user = ins.rows[0];
+      }
+    }
+
+    const roleValue = user.role || "pendiente";
+    const roleMeta = resolveRoleMeta(roleValue);
+    let department = roleMeta.scope || "pendiente";
+    if (user?.department_id) {
+      const depQ = await db.query("SELECT code FROM departments WHERE id = $1 LIMIT 1", [
+        user.department_id,
+      ]);
+      department = depQ.rows[0]?.code || department;
+    }
+
+    const userProfile = {
+      id: user.id,
+      email: user.email,
+      fullname: user.fullname,
+      role: roleValue,
+      department,
+      scope: roleMeta.scope,
+      dashboard: roleMeta.dashboard,
+      lopdp_internal_status: user.lopdp_internal_status || "pending",
+      extra_roles: user.extra_roles || [],
+    };
+
+    // Generar correlation ID para tracking de sesión
+    const correlationId = randomUUID();
+
+    // Set correlation ID in request context for this request
+    const { updateContext } = require("../../utils/requestContext");
+    updateContext({
+      correlation_id: correlationId,
+      user_id: user.id,
+      user_email: user.email,
+      role: user.role
+    });
+
+    // Firmar tokens
+    const accessToken = signAccess(userProfile);
+    const refreshToken = signRefresh({ id: user.id, email: user.email });
+
+    // Registrar sesión
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || req.ip;
+    runAsyncLoginTask(createSession({
+        email,
+        ip,
+        userAgent: req.headers["user-agent"],
+        refreshToken,
+      }), { userId: user.id, email, task: "createSession" });
+
+    runAsyncLoginTask(syncAttendanceDuringLogin(user), {
+      userId: user.id,
+      email,
+      task: "syncAttendanceDuringLogin",
+    });
+
+    // 🔐 Seguridad: Verificar login fuera de horario
+    let offHoursCheck = isOffHours(new Date());
+
+    // TEST HOOK: Solo en desarrollo/sandbox para generar eventos de prueba
+    if (process.env.NODE_ENV !== 'production' && req.headers['x-security-test'] === '1') {
+      logger.warn('🚨 SECURITY TEST HOOK USED - Forcing off-hours detection');
+      offHoursCheck = {
+        isOffHours: true,
+        reason: 'offhours_test',
+        schedule: { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1, 2, 3, 4, 5] }
+      };
+    }
+
+    const geoInfo = getGeoLocation(ip);
+
+    if (offHoursCheck.isOffHours) {
+      logger.warn(`🚨 Login fuera de horario detectado: ${email}`, {
+        correlationId,
+        reason: offHoursCheck.reason,
+        ip,
+        geo: geoInfo,
+        userAgent: req.headers["user-agent"]
+      });
+
+      // Notificar a TI sobre login fuera de horario
+      runAsyncLoginTask(notifyTIAboutOffHoursLogin({
+          correlationId,
+          user,
+          offHoursCheck,
+          ip,
+          geo: geoInfo,
+          userAgent: req.headers["user-agent"]
+        }), {
+          correlationId,
+          userId: user.id,
+          userEmail: user.email,
+          task: "notifyTIAboutOffHoursLogin",
+        });
+    }
+
+    // Registrar login exitoso en auditoría - usando datos_nuevos (no contexto)
+    runAsyncLoginTask(logAction({
+      usuario_id: user.id,
+      usuario_email: user.email,
+      rol: user.role || "pendiente",
+      modulo: "auth",
+      accion: offHoursCheck.isOffHours ? "offhours_login" : "login_success",
+      descripcion: offHoursCheck.isOffHours ?
+        `Login exitoso fuera de horario (${offHoursCheck.reason})` :
+        "Login exitoso",
+      datos_nuevos: {
+        event: offHoursCheck.isOffHours ? "security.offhours_login" : "auth.login_success",
+        correlation_id: correlationId,
+        reason: offHoursCheck.reason,
+        schedule: offHoursCheck.schedule || { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1, 2, 3, 4, 5] },
+        ip,
+        user_agent: req.headers["user-agent"],
+        geo_location: geoInfo,
+        off_hours_info: offHoursCheck,
+        session: {
+          user_email: user.email,
+          login_time_guess_iso: new Date().toISOString()
+        }
+      }
+    }), {
+      correlationId,
+      userId: user.id,
+      userEmail: user.email,
+      task: "logAction",
+    });
+
+    // Redirigir al frontend con tokens
+    const redirectUrl = `${FRONTEND_URL}/login/callback#accessToken=${encodeURIComponent(
+      accessToken
+    )}&refreshToken=${encodeURIComponent(refreshToken)}&email=${encodeURIComponent(email)}`;
+
+    logger.info(`✅ Login exitoso: ${email}`, { correlationId, offHours: offHoursCheck.isOffHours });
+    return res.redirect(redirectUrl);
+  } catch (err) {
+    if (err.code === "ECONNREFUSED" || err.code === "EPERM") {
+      logger.error(
+        "❌ No se pudo conectar a PostgreSQL (%s:%s). ¿Está levantado el servidor?",
+        process.env.DB_HOST || "localhost",
+        process.env.DB_PORT || 5432
+      );
+      return res.redirect(`${FRONTEND_URL}/login?error=db_unavailable`);
+    }
+    logger.error("❌ Error general en callback OAuth2: %s", err.message);
+    logger.error("💥 Detalles completos del error:", {
+      name: err.name,
+      message: err.message,
+      stack: err.stack,
+      response: err.response?.data,
+      code: err.code,
+    });
+    return res.redirect(`${FRONTEND_URL}/login?error=auth_failed`);
+  } finally {
+    oauth2Client.setCredentials(null);
+  }
+};
+
+/* ============================================================
+   3️⃣ /auth/me → requiere Authorization: Bearer
+============================================================ */
+const me = async (req, res) => {
+  try {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate");
+    const { email } = req.user || {};
+    const lite = ["1", "true", "yes"].includes(String(req.query?.lite || "").trim().toLowerCase());
+    if (!email) return res.status(401).json({ error: "No autorizado" });
+
+    const { rows } = await db.query(
+      `
+      SELECT
+        u.id,
+        u.email,
+        u.fullname,
+        u.role,
+        d.code AS department,
+        up.avatar_url,
+        up.avatar_drive_id,
+        u.lopdp_internal_status,
+        u.lopdp_internal_signed_at,
+        u.lopdp_internal_pdf_file_id,
+        u.lopdp_internal_signature_file_id,
+        u.auth_provider,
+        u.must_change_password,
+        u.extra_roles
+      FROM users u
+      LEFT JOIN departments d ON u.department_id = d.id
+      LEFT JOIN user_profile up ON up.user_id = u.id
+      WHERE u.email = $1 LIMIT 1;
+      `,
+      [email]
+    );
+
+    if (!rows.length) return res.status(404).json({ error: "Usuario no encontrado" });
+    const payload = rows[0];
+
+    // /auth/me solo retorna datos de sesion y perfil.
+
+    const meta = resolveRoleMeta(payload.role);
+    const avatarUrl = (() => {
+      if (payload.avatar_url && payload.avatar_url.startsWith("data:")) return payload.avatar_url;
+      if (payload.avatar_drive_id) {
+        // Usar sz=300 para asegurar buena calidad y compatibilidad con visualización directa
+        return `https://drive.google.com/thumbnail?id=${payload.avatar_drive_id}&sz=w300`;
+      }
+      return payload.avatar_url || null;
+    })();
+    const baseUser = {
+      ...payload,
+      scope: meta.scope,
+      dashboard: meta.dashboard,
+      lopdp_internal_status: payload.lopdp_internal_status || "pending",
+      avatar_url: avatarUrl,
+      avatar_drive_id: payload.avatar_drive_id || null,
+      has_signature: !!payload.lopdp_internal_signature_file_id,
+    };
+
+    if (lite) {
+      return res.status(200).json({ user: baseUser });
+    }
+
+    const [moduleAccess, moduleGlobalStatus] = await Promise.all([
+      listUserModuleAccess(payload.id),
+      getGlobalModuleStatusForUser(payload.email),
+    ]);
+
+    return res.status(200).json({
+      user: {
+        ...baseUser,
+        module_access: moduleAccess,
+        module_global_status: moduleGlobalStatus,
+        module_catalog: getCatalog(),
+        permissions: listPermissionsForUser(payload),
+        authorization_manifest_version: AUTHORIZATION_MANIFEST_VERSION,
+      },
+    });
+  } catch (err) {
+    logger.error("❌ Error en /auth/me: %o", err);
+    res.status(500).json({ error: "No se pudo obtener el usuario actual" });
+  }
+};
+
+/* ============================================================
+   4️⃣ /auth/refresh
+============================================================ */
+const refreshToken = async (req, res) => {
+  try {
+    const token = req.headers["x-refresh-token"] || req.body?.refreshToken;
+    if (!token) {
+      logger.warn({ ...buildAuthRequestMeta(req) }, "refreshToken rechazado: request sin refresh token");
+      return res.status(401).json({ ok: false, message: "No hay refresh token." });
+    }
+
+    const decoded = jwt.verify(token, process.env.REFRESH_SECRET_KEY);
+
+    const { rows } = await db.query(
+      "SELECT id, email, fullname, role, department_id, extra_roles FROM users WHERE id = $1 LIMIT 1;",
+      [decoded.id]
+    );
+    if (!rows.length)
+      return res.status(401).json({ ok: false, message: "Usuario no válido." });
+
+    const u = rows[0];
+    const depQ = await db.query("SELECT code FROM departments WHERE id = $1", [
+      u.department_id,
+    ]);
+    const department = depQ.rows[0]?.code || "pendiente";
+
+    const roleMeta = resolveRoleMeta(u.role);
+    const newAccessToken = signAccess({
+      id: u.id,
+      email: u.email,
+      fullname: u.fullname,
+      role: u.role,
+      department,
+      scope: roleMeta.scope,
+      dashboard: roleMeta.dashboard,
+      extra_roles: u.extra_roles || [],
+    });
+    const newRefreshToken = signRefresh({ id: u.id, email: u.email });
+
+    // Actualiza sesión activa con nuevo refresh
+    const updated = await updateSessionRefreshToken({
+      email: u.email,
+      previousToken: token,
+      newToken: newRefreshToken,
+    });
+
+    if (!updated) {
+      logger.warn("refreshToken rechazado: no existe una sesion activa asociada al token entregado", {
+        ...buildAuthRequestMeta(req),
+        userId: u.id,
+        email: u.email,
+        refreshTokenFragment: token?.slice(0, 8),
+      });
+      return res.status(401).json({ ok: false, message: "Sesion no valida para refresco." });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+    });
+  } catch (err) {
+    logger.warn("refreshToken inválido/expirado: %s", err.message);
+    return res.status(401).json({ ok: false, message: "Token inválido o expirado." });
+  }
+};
+
+/* ============================================================
+   5️⃣ Logout
+============================================================ */
+const logout = async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    let email = null;
+
+    if (authHeader?.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      try {
+        const decoded = jwt.verify(token, process.env.SECRET_KEY);
+        email = decoded.email;
+      } catch {
+        logger.warn("⚠️ Token inválido durante logout");
+      }
+    }
+
+    if (email) {
+      await closeSessionsByEmail(email);
+    } else if (req.headers["x-refresh-token"]) {
+      await closeSessionByRefreshToken(req.headers["x-refresh-token"]);
+    }
+
+    return res.status(200).json({ ok: true, message: "Sesión cerrada." });
+  } catch (err) {
+    logger.error("❌ Error cerrando sesión: %o", err);
+    res.status(500).json({ ok: false, message: "Error cerrando sesión" });
+  }
+};
+
+/* ============================================================
+   Auditoría
+============================================================ */
+const listSessions = async (_req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT 
+        us.id, us.user_email, u.fullname, u.role, d.code AS department,
+        us.ip, us.user_agent, us.login_time, us.logout_time,
+        CASE WHEN us.logout_time IS NULL THEN 'Activa' ELSE 'Cerrada' END AS estado
+      FROM user_sessions us
+      LEFT JOIN users u ON u.email = us.user_email
+      LEFT JOIN departments d ON d.id = u.department_id
+      ORDER BY us.login_time DESC;
+    `);
+    logger.info("[AUTH] Consulta de sesiones", { total: rows.length });
+    return res.status(200).json({ ok: true, total: rows.length, sessions: rows });
+  } catch (err) {
+    logger.error("❌ Error obteniendo sesiones: %o", err);
+    return res.status(500).json({ ok: false, message: "Error obteniendo sesiones" });
+  }
+};
+
+const activeUsers = async (_req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT DISTINCT ON (us.user_email)
+        us.user_email, u.fullname, u.role, d.code AS department,
+        us.ip, us.user_agent, us.login_time
+      FROM user_sessions us
+      LEFT JOIN users u ON u.email = us.user_email
+      LEFT JOIN departments d ON d.id = u.department_id
+      WHERE us.logout_time IS NULL
+      ORDER BY us.user_email, us.login_time DESC;
+    `);
+    logger.info("[AUTH] Usuarios activos consultados", { total: rows.length });
+    return res.status(200).json({ ok: true, total: rows.length, active: rows });
+  } catch (err) {
+    logger.error("❌ Error usuarios activos: %o", err);
+    return res.status(500).json({ ok: false, message: "Error obteniendo usuarios activos" });
+  }
+};
+
+/* ============================================================
+   6️⃣ Consentimiento interno LOPDP (nuevos colaboradores)
+============================================================ */
+const acceptInternalLopdp = async (req, res) => {
+  try {
+    const actor = req.user || {};
+    if (!actor?.email) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    const {
+      signature_base64: signatureBase64,
+      pdf_base64: pdfBase64,
+      notes,
+      accepted,
+    } = req.body || {};
+
+    if (!accepted) {
+      return res
+        .status(400)
+        .json({ ok: false, message: "Debe aceptar el aviso de protección de datos" });
+    }
+
+    if (!signatureBase64 || !pdfBase64) {
+      return res.status(400).json({ ok: false, message: "Falta la firma o el PDF generado" });
+    }
+
+    const { rows } = await db.query(
+      "SELECT id, email, fullname, role, department_id, lopdp_internal_status FROM users WHERE email = $1 LIMIT 1",
+      [actor.email]
+    );
+
+    if (!rows.length) return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
+    const user = rows[0];
+
+    if ((user.lopdp_internal_status || "").toLowerCase() === "granted") {
+      return res.status(200).json({ ok: true, alreadyAccepted: true });
+    }
+
+    const rootId =
+      process.env.DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID;
+    if (!rootId) {
+      return res.status(500).json({
+        ok: false,
+        message: "No se ha configurado DRIVE_ROOT_FOLDER_ID en el entorno",
+      });
+    }
+
+    const lopdpRoot = await ensureFolder(LOPDP_ROOT_FOLDER, rootId);
+    const internalRoot = await ensureFolder(LOPDP_INTERNAL_FOLDER, lopdpRoot.id);
+    const personFolder = await ensureFolder(
+      user.email || user.fullname || INTERNAL_LOPDP_FOLDER,
+      internalRoot.id
+    );
+    const signaturesFolder = await ensureFolder(LOPDP_SIGNATURES_FOLDER, personFolder.id);
+    const documentsFolder = await ensureFolder(LOPDP_DOCUMENTS_FOLDER, personFolder.id);
+    const today = new Date().toISOString().slice(0, 10);
+
+    const signatureFile = await uploadBase64File(
+      `firma-${user.email}-${today}.png`,
+      signatureBase64,
+      "image/png",
+      signaturesFolder.id
+    );
+
+    const pdfFile = await uploadBase64File(
+      `LOPDP-${user.email}-${today}.pdf`,
+      pdfBase64,
+      "application/pdf",
+      documentsFolder.id
+    );
+
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket?.remoteAddress ||
+      req.ip;
+    const userAgent = req.headers["user-agent"] || null;
+
+    const updated = await db.query(
+      `
+      UPDATE users
+      SET lopdp_internal_status = 'granted',
+          lopdp_internal_signed_at = NOW(),
+          lopdp_internal_pdf_file_id = $2,
+          lopdp_internal_signature_file_id = $3,
+          lopdp_internal_ip = $4,
+          lopdp_internal_user_agent = $5,
+          lopdp_internal_notes = COALESCE($6, lopdp_internal_notes),
+          updated_at = NOW()
+      WHERE email = $1
+      RETURNING id, email, fullname, role, department_id, lopdp_internal_status, lopdp_internal_signed_at, lopdp_internal_pdf_file_id, lopdp_internal_signature_file_id;
+      `,
+      [user.email, pdfFile.id, signatureFile.id, ip, userAgent, notes || null]
+    );
+
+    await db
+      .query(
+        `
+        INSERT INTO user_lopdp_consents (
+          user_id,
+          user_email,
+          status,
+          pdf_file_id,
+          signature_file_id,
+          ip,
+          user_agent,
+          notes
+        ) VALUES ($1, $2, 'granted', $3, $4, $5, $6, $7);
+        `,
+        [user.id, user.email, pdfFile.id, signatureFile.id, ip, userAgent, notes || null]
+      )
+      .catch((err) => logger.warn({ err }, "No se pudo registrar auditoría interna LOPDP"));
+
+    const updatedUser = updated.rows[0];
+    let department = null;
+    if (updatedUser?.department_id) {
+      const depQ = await db.query("SELECT code FROM departments WHERE id = $1 LIMIT 1", [
+        updatedUser.department_id,
+      ]);
+      department = depQ.rows[0]?.code || null;
+    }
+    const meta = resolveRoleMeta(updatedUser.role || "pendiente");
+
+    return res.status(200).json({
+      ok: true,
+      user: {
+        ...updatedUser,
+        department: department || meta.scope || "pendiente",
+        scope: meta.scope,
+        dashboard: meta.dashboard,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error registrando LOPDP interno");
+    return res.status(500).json({ ok: false, message: "No se pudo registrar la aceptación" });
+  }
+};
+
+/* ============================================================
+   7️⃣ Login local de PRODUCCION para usuarios sin OAuth (pasantes)
+   Ver docs/plans/pasantes-access-plan.md. Distinto de localLogin (sandbox,
+   mas abajo): aca cada usuario tiene su propio password_hash en BD, no una
+   contrasena compartida, y SI esta habilitado en produccion.
+============================================================ */
+
+// Rate limiting simple en memoria: no hay ningun limitador existente en el
+// modulo auth (ni siquiera /auth/refresh lo tiene, ver CONTEXT.md del
+// modulo) y aca es mas critico que en OAuth -- Google absorbe el riesgo de
+// fuerza bruta ahi, aca no hay nadie mas que lo haga. No es distribuido
+// entre instancias de Cloud Run, pero el volumen esperado de pasantes es
+// bajo y esto ya sube el costo de un ataque de diccionario significativamente
+// mas que no tener nada.
+const LOGIN_ATTEMPT_MAX = 5;
+const LOGIN_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+const loginAttempts = new Map(); // `${username}:${ip}` -> { count, blockedUntil }
+
+function checkLoginRateLimit(key) {
+  const entry = loginAttempts.get(key);
+  if (!entry) return { blocked: false };
+  if (entry.blockedUntil && entry.blockedUntil > Date.now()) {
+    return { blocked: true, retryAfterMs: entry.blockedUntil - Date.now() };
+  }
+  if (entry.blockedUntil && entry.blockedUntil <= Date.now()) {
+    loginAttempts.delete(key);
+  }
+  return { blocked: false };
+}
+
+function registerLoginFailure(key) {
+  const entry = loginAttempts.get(key) || { count: 0, blockedUntil: null };
+  entry.count += 1;
+  if (entry.count >= LOGIN_ATTEMPT_MAX) {
+    entry.blockedUntil = Date.now() + LOGIN_ATTEMPT_WINDOW_MS;
+  }
+  loginAttempts.set(key, entry);
+}
+
+function clearLoginAttempts(key) {
+  loginAttempts.delete(key);
+}
+
+const localAuthLogin = async (req, res) => {
+  const { username, password } = req.body || {};
+  const cleanUsername = String(username || "").trim();
+  if (!cleanUsername || !password) {
+    return res.status(400).json({ ok: false, message: "Usuario y contraseña son requeridos" });
+  }
+
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || req.ip;
+  const rateLimitKey = `${cleanUsername.toLowerCase()}:${ip}`;
+  const rateLimit = checkLoginRateLimit(rateLimitKey);
+  if (rateLimit.blocked) {
+    return res.status(429).json({
+      ok: false,
+      code: "LOGIN_RATE_LIMITED",
+      message: "Demasiados intentos fallidos. Intenta de nuevo en unos minutos.",
+      retryAfterMs: rateLimit.retryAfterMs,
+    });
+  }
+
+  try {
+    const { rows } = await db.query(
+      `SELECT id, email, fullname, role, department_id, lopdp_internal_status,
+              password_hash, auth_provider, must_change_password, account_expires_at,
+              COALESCE(active, true) AS active
+       FROM users
+       WHERE LOWER(username) = LOWER($1)
+       LIMIT 1`,
+      [cleanUsername],
+    );
+
+    const user = rows[0];
+    // Mensaje generico deliberado (no distinguir "usuario no existe" de
+    // "password incorrecta") para no filtrar que usernames son validos.
+    const genericError = () => res.status(401).json({ ok: false, message: "Usuario o contraseña incorrectos" });
+
+    if (!user || user.auth_provider !== "local" || !user.password_hash) {
+      registerLoginFailure(rateLimitKey);
+      return genericError();
+    }
+    if (!user.active) {
+      registerLoginFailure(rateLimitKey);
+      return res.status(403).json({ ok: false, code: "ACCOUNT_INACTIVE", message: "Esta cuenta está inactiva. Contacta al administrador." });
+    }
+    // Mensaje especifico (a diferencia del generico de arriba) a proposito:
+    // un administrador revisando un reporte de "no puedo entrar" necesita
+    // poder distinguir "vencio la pasantia" de "escribio mal la password" --
+    // no es informacion sensible, el username ya se confirmo valido en la
+    // query anterior.
+    if (user.account_expires_at && new Date(user.account_expires_at).getTime() < Date.now()) {
+      registerLoginFailure(rateLimitKey);
+      return res.status(403).json({ ok: false, code: "ACCOUNT_EXPIRED", message: "Esta cuenta venció. Contacta al administrador para renovarla." });
+    }
+
+    const passwordMatches = await bcrypt.compare(String(password), user.password_hash);
+    if (!passwordMatches) {
+      registerLoginFailure(rateLimitKey);
+      return genericError();
+    }
+
+    clearLoginAttempts(rateLimitKey);
+
+    const roleValue = user.role || "pendiente";
+    const roleMeta = resolveRoleMeta(roleValue);
+    let department = roleMeta.scope || "pendiente";
+    if (user.department_id) {
+      const depQ = await db.query("SELECT code FROM departments WHERE id = $1 LIMIT 1", [user.department_id]);
+      department = depQ.rows[0]?.code || department;
+    }
+
+    // Si debe cambiar password (alta reciente o reset admin), se emite un
+    // JWT de alcance reducido: el frontend lo detecta via
+    // must_change_password=true y redirige a /cambiar-password ANTES de
+    // dejar entrar al resto del sistema. El middleware verifyToken no
+    // distingue este caso -- la restriccion real es que change-password es
+    // el unico endpoint que tiene sentido llamar con este estado, y el
+    // frontend no navega a ningun otro lado mientras must_change_password
+    // sea true (ver AuthContext/ProtectedRoute).
+    const userProfile = {
+      id: user.id,
+      email: user.email,
+      fullname: user.fullname,
+      role: roleValue,
+      department,
+      scope: roleMeta.scope,
+      dashboard: roleMeta.dashboard,
+      lopdp_internal_status: user.lopdp_internal_status || "pending",
+      must_change_password: Boolean(user.must_change_password),
+    };
+
+    const accessToken = signAccess(userProfile);
+    const refreshToken = signRefresh({ id: user.id, email: user.email });
+
+    try {
+      await createSession({ email: user.email, ip, userAgent: req.headers["user-agent"], refreshToken });
+    } catch (sessionErr) {
+      logger.warn("[LOCAL_AUTH] No se pudo registrar sesion: %s", sessionErr.message);
+    }
+
+    runAsyncLoginTask(syncAttendanceDuringLogin(user), { userId: user.id, email: user.email });
+
+    logger.info("[LOCAL_AUTH] Login local: %s (id=%s)", cleanUsername, user.id);
+    return res.json({
+      ok: true,
+      accessToken,
+      refreshToken,
+      email: user.email,
+      must_change_password: Boolean(user.must_change_password),
+    });
+  } catch (err) {
+    logger.error({ err }, "[LOCAL_AUTH] Error en login local");
+    return res.status(500).json({ ok: false, message: "Error interno" });
+  }
+};
+
+const MIN_PASSWORD_LENGTH = 8;
+
+const changePassword = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    const { currentPassword, newPassword } = req.body || {};
+    if (!newPassword || String(newPassword).length < MIN_PASSWORD_LENGTH) {
+      return res.status(400).json({ ok: false, message: `La nueva contraseña debe tener al menos ${MIN_PASSWORD_LENGTH} caracteres` });
+    }
+
+    const { rows } = await db.query(
+      `SELECT id, password_hash, auth_provider, must_change_password FROM users WHERE id = $1 LIMIT 1`,
+      [userId],
+    );
+    const user = rows[0];
+    if (!user || user.auth_provider !== "local") {
+      return res.status(400).json({ ok: false, message: "Esta cuenta no usa autenticación local" });
+    }
+
+    // Si el usuario NO viene de un flujo de cambio obligatorio, se exige la
+    // password actual (cambio voluntario). En el flujo obligatorio
+    // (must_change_password=true, justo tras alta o reset admin) el JWT ya
+    // probo identidad recien emitido por local-login, no hace falta pedirla
+    // de nuevo -- pedirla ahi solo agregaria friccion sin ganancia de
+    // seguridad real (el admin ya le entrego la password temporal aparte).
+    if (!user.must_change_password) {
+      if (!currentPassword) {
+        return res.status(400).json({ ok: false, message: "Debes indicar tu contraseña actual" });
+      }
+      const matches = await bcrypt.compare(String(currentPassword), user.password_hash || "");
+      if (!matches) {
+        return res.status(401).json({ ok: false, message: "Contraseña actual incorrecta" });
+      }
+    }
+
+    const newHash = await bcrypt.hash(String(newPassword), 11);
+    await db.query(
+      `UPDATE users SET password_hash = $1, must_change_password = false, updated_at = NOW() WHERE id = $2`,
+      [newHash, userId],
+    );
+
+    logger.info("[LOCAL_AUTH] Password cambiada: user_id=%s", userId);
+    return res.json({ ok: true, message: "Contraseña actualizada" });
+  } catch (err) {
+    logger.error({ err }, "[LOCAL_AUTH] Error cambiando password");
+    return res.status(500).json({ ok: false, message: "Error interno" });
+  }
+};
+
+/* ============================================================
+   7️⃣ Login local (solo sandbox — SANDBOX_AUTH=true)
+============================================================ */
+const localLogin = async (req, res) => {
+  if (process.env.NODE_ENV === "production") {
+    return res.status(403).json({ ok: false, message: "No disponible en produccion" });
+  }
+  if (process.env.SANDBOX_AUTH !== "true") {
+    return res.status(403).json({ ok: false, message: "Sandbox auth no habilitado" });
+  }
+
+  const sandboxPassword = process.env.SANDBOX_PASSWORD;
+  if (!sandboxPassword) {
+    return res.status(500).json({ ok: false, message: "SANDBOX_PASSWORD no configurado en .env" });
+  }
+
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ ok: false, message: "Email y contrasena requeridos" });
+  }
+  if (password !== sandboxPassword) {
+    return res.status(401).json({ ok: false, message: "Credenciales incorrectas" });
+  }
+
+  try {
+    const { rows } = await db.query(
+      "SELECT id, email, fullname, role, department_id, lopdp_internal_status FROM users WHERE LOWER(email) = LOWER($1) LIMIT 1",
+      [email.trim()]
+    );
+
+    if (!rows.length) {
+      return res.status(401).json({
+        ok: false,
+        message: "Usuario no encontrado. Debe existir en la base de datos.",
+      });
+    }
+
+    const user = rows[0];
+    const roleValue = user.role || "pendiente";
+    const roleMeta = resolveRoleMeta(roleValue);
+    let department = roleMeta.scope || "pendiente";
+    if (user.department_id) {
+      const depQ = await db.query("SELECT code FROM departments WHERE id = $1 LIMIT 1", [
+        user.department_id,
+      ]);
+      department = depQ.rows[0]?.code || department;
+    }
+
+    const userProfile = {
+      id: user.id,
+      email: user.email,
+      fullname: user.fullname,
+      role: roleValue,
+      department,
+      scope: roleMeta.scope,
+      dashboard: roleMeta.dashboard,
+      lopdp_internal_status: user.lopdp_internal_status || "pending",
+    };
+
+    const accessToken = signAccess(userProfile);
+    const refreshToken = signRefresh({ id: user.id, email: user.email });
+
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || req.ip;
+    try {
+      await createSession({ email: user.email, ip, userAgent: req.headers["user-agent"], refreshToken });
+    } catch (sessionErr) {
+      logger.warn("[SANDBOX] No se pudo registrar sesion: %s", sessionErr.message);
+    }
+
+    logger.info("[SANDBOX] Login local: %s", user.email);
+    return res.json({ ok: true, accessToken, refreshToken, email: user.email });
+  } catch (err) {
+    logger.error({ err }, "[SANDBOX] Error en login local");
+    return res.status(500).json({ ok: false, message: "Error interno" });
+  }
+};
+
+/* ============================================================
+   Exportación
+============================================================ */
+module.exports = {
+  googleAuthRedirect,
+  googleCallback,
+  me,
+  refreshToken,
+  logout,
+  listSessions,
+  activeUsers,
+  acceptInternalLopdp,
+  localLogin,
+  localAuthLogin,
+  changePassword,
+};

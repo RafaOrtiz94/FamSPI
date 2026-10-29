@@ -1,0 +1,195 @@
+{
+  "generatedAt": "2026-10-07",
+  "note": "Solo conteos, sin datos personales. Origen: copia saneada de produccion en el ambiente local.",
+  "usersByRole": [
+    {
+      "role": "acp_comercial",
+      "total": 1,
+      "active": 1,
+      "local_login": 0
+    },
+    {
+      "role": "comercial",
+      "total": 6,
+      "active": 6,
+      "local_login": 0
+    },
+    {
+      "role": "financiero",
+      "total": 2,
+      "active": 2,
+      "local_login": 0
+    },
+    {
+      "role": "gerencia_general",
+      "total": 1,
+      "active": 1,
+      "local_login": 0
+    },
+    {
+      "role": "ing_servicio",
+      "total": 5,
+      "active": 4,
+      "local_login": 0
+    },
+    {
+      "role": "ing_servicio_ext",
+      "total": 6,
+      "active": 6,
+      "local_login": 0
+    },
+    {
+      "role": "jefe_calidad",
+      "total": 1,
+      "active": 1,
+      "local_login": 0
+    },
+    {
+      "role": "jefe_comercial",
+      "total": 1,
+      "active": 1,
+      "local_login": 0
+    },
+    {
+      "role": "jefe_financiero",
+      "total": 1,
+      "active": 1,
+      "local_login": 0
+    },
+    {
+      "role": "jefe_logistica",
+      "total": 1,
+      "active": 1,
+      "local_login": 0
+    },
+    {
+      "role": "jefe_operaciones",
+      "total": 2,
+      "active": 2,
+      "local_login": 0
+    },
+    {
+      "role": "jefe_servicio",
+      "total": 1,
+      "active": 1,
+      "local_login": 0
+    },
+    {
+      "role": "jefe_ti",
+      "total": 1,
+      "active": 1,
+      "local_login": 0
+    },
+    {
+      "role": "logistica",
+      "total": 1,
+      "active": 1,
+      "local_login": 0
+    },
+    {
+      "role": "null",
+      "total": 2,
+      "active": 0,
+      "local_login": 0
+    },
+    {
+      "role": "operaciones",
+      "total": 2,
+      "active": 2,
+      "local_login": 0
+    },
+    {
+      "role": "pasante",
+      "total": 3,
+      "active": 2,
+      "local_login": 3
+    },
+    {
+      "role": "pending",
+      "total": 3,
+      "active": 0,
+      "local_login": 0
+    },
+    {
+      "role": "talento_humano",
+      "total": 2,
+      "active": 2,
+      "local_login": 0
+    }
+  ],
+  "extraRoleCombinations": [
+    {
+      "role": "comercial",
+      "extra_roles": "{crm_leads_all_access}",
+      "users": 1
+    },
+    {
+      "role": "financiero",
+      "extra_roles": "{backoffice_comercial,bc_quality_summary}",
+      "users": 1
+    },
+    {
+      "role": "talento_humano",
+      "extra_roles": "{backoffice_comercial}",
+      "users": 1
+    }
+  ],
+  "moduleAccessByRole": [
+    {
+      "role": "jefe_ti",
+      "users_with_rows": 1,
+      "rows": 35,
+      "enabled": 35,
+      "disabled": 0
+    },
+    {
+      "role": "pasante",
+      "users_with_rows": 3,
+      "rows": 186,
+      "enabled": 35,
+      "disabled": 151
+    },
+    {
+      "role": "talento_humano",
+      "users_with_rows": 1,
+      "rows": 35,
+      "enabled": 35,
+      "disabled": 0
+    }
+  ],
+  "usersWithoutModuleRows": 31,
+  "moduleGlobalStatus": [
+    {
+      "module_key": "kickoff_2026",
+      "stage": "construction",
+      "whitelist_size": 0
+    },
+    {
+      "module_key": "ti_casos_externos",
+      "stage": "construction",
+      "whitelist_size": 0
+    }
+  ],
+  "centralTables": [
+    {
+      "t": "modules",
+      "n": 0
+    },
+    {
+      "t": "permissions",
+      "n": 0
+    },
+    {
+      "t": "role_permissions",
+      "n": 0
+    },
+    {
+      "t": "roles",
+      "n": 0
+    },
+    {
+      "t": "user_roles",
+      "n": 0
+    }
+  ]
+}

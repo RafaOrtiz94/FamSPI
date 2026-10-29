@@ -25,8 +25,29 @@ export const uploadCollaboratorDocument = async (id, docType, file, options = {}
   });
   return data;
 };
+
+export const resolveCollaboratorQualificationPending = async (id, legacyId, payload) => {
+  const { data } = await api.post(
+    `/collaborators/${id}/qualification-pending/${legacyId}/resolve`,
+    payload,
+  );
+  return data;
+};
+
 export const getCollaboratorStats = async () => {
   const { data } = await api.get('/collaborators/stats');
   return data;
+};
+
+export const getDocumentsReport = async (params = {}) => {
+  const { data } = await api.get('/collaborators/documents/report', { params });
+  return data;
+};
+
+export const generateDocumentsConsolidated = async (payload = {}) => {
+  const response = await api.post('/collaborators/documents/report/consolidated-pdf', payload, {
+    responseType: 'blob',
+  });
+  return response;
 };
 

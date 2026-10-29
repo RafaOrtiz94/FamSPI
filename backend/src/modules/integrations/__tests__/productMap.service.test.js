@@ -11,29 +11,26 @@ describe("productMap.service", () => {
   });
 
   it("lista filas paginadas del libro de correspondencia", async () => {
-    db.query
-      .mockResolvedValueOnce({
-        rows: [
-          {
-            id: 1,
-            legacy_code: "LEG-001",
-            spi_sku: "SPI-001",
-            spi_equipment_model_id: 10,
-            spi_equipment_model_name: "Cobas 411",
-            spi_equipment_model_code: "CB411",
-            spi_equipment_model_sku: "SPI-001",
-            odoo_product_id: 345,
-            business_category: "equipment",
-            active: true,
-            notes: "map inicial",
-            created_at: "2026-04-11T00:00:00.000Z",
-            updated_at: "2026-04-11T00:00:00.000Z",
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        rows: [{ total: 1 }],
-      });
+    db.query.mockResolvedValueOnce({
+      rows: [
+        {
+          id: 1,
+          legacy_code: "LEG-001",
+          spi_sku: "SPI-001",
+          spi_equipment_model_id: 10,
+          spi_equipment_model_name: "Cobas 411",
+          spi_equipment_model_code: "CB411",
+          spi_equipment_model_sku: "SPI-001",
+          odoo_product_id: 345,
+          business_category: "equipment",
+          active: true,
+          notes: "map inicial",
+          created_at: "2026-04-11T00:00:00.000Z",
+          updated_at: "2026-04-11T00:00:00.000Z",
+          total_count: 1,
+        },
+      ],
+    });
 
     const result = await service.listProductMap({
       page: 1,
@@ -43,6 +40,7 @@ describe("productMap.service", () => {
       business_category: "equipment",
     });
 
+    expect(db.query).toHaveBeenCalledTimes(1);
     expect(result.total).toBe(1);
     expect(result.rows).toHaveLength(1);
     expect(result.rows[0]).toMatchObject({
@@ -51,6 +49,7 @@ describe("productMap.service", () => {
       odoo_product_id: 345,
       spi_equipment_model_id: 10,
     });
+    expect(result.rows[0]).not.toHaveProperty("total_count");
   });
 
   it("crea fila cuando no existe match activo para upsert", async () => {

@@ -7,8 +7,9 @@
 
 const { google } = require("googleapis");
 const nodemailer = require("nodemailer");
+const { randomUUID } = require("crypto");
 const logger = require("../config/logger");
-const { gmail, createDelegatedJwtClient } = require("../config/google");
+const { gmail, createDelegatedJwtClient, createDelegatedGmailThreadClient } = require("../config/google");
 const gmailService = require("../services/gmail.service");
 const { resolveDelegatedUser } = require("./googleCredentials");
 const { htmlToText, sendChatMessage } = require("./googleChat");
@@ -195,7 +196,47 @@ const encodeAddressHeader = (value) => {
   return `${encodeHeaderValue(displayName)} <${email}>`;
 };
 
-const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo }) => {
+const MESSAGE_ID_DOMAIN = "fam-project.com";
+
+const generateMessageId = () => `<${randomUUID()}@${MESSAGE_ID_DOMAIN}>`;
+
+function threadContextError(cause) {
+  const error = new Error("No se pudo recuperar el contexto del hilo de Gmail.");
+  error.code = "MAIL_THREAD_CONTEXT_UNAVAILABLE";
+  error.cause = cause;
+  return error;
+}
+
+async function getLastThreadMessageId(gmailClient, threadId, { required = false } = {}) {
+  if (!gmailClient?.users?.threads?.get || !threadId) return null;
+  try {
+    const response = await gmailClient.users.threads.get({
+      userId: "me",
+      id: threadId,
+      format: "metadata",
+      metadataHeaders: ["Message-ID"],
+    });
+    const messages = Array.isArray(response?.data?.messages) ? response.data.messages : [];
+    const lastMessage = messages[messages.length - 1];
+    const header = lastMessage?.payload?.headers?.find(
+      (item) => String(item?.name || "").toLowerCase() === "message-id",
+    );
+    return header?.value || null;
+  } catch (error) {
+    logger.warn(
+      { threadId, error: error?.message || String(error) },
+      "[MAILER] No se pudo recuperar el Message-ID del hilo existente",
+    );
+    if (required) throw threadContextError(error);
+    return null;
+  }
+}
+
+// Parte cada linea base64 a 76 caracteres (RFC 2045) -- Gmail suele tolerar
+// lineas mas largas, pero otros clientes/relays en el camino no siempre.
+const wrapBase64 = (value) => String(value || "").replace(/(.{1,76})/g, "$1\r\n").trim();
+
+const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo, messageId, inReplyTo, references, attachments = [], headers = {} }) => {
   const lines = [
     `From: ${encodeAddressHeader(from)}`,
     `To: ${Array.isArray(to) ? to.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(to)}`,
@@ -204,12 +245,43 @@ const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo }) => {
   if (cc) lines.push(`Cc: ${Array.isArray(cc) ? cc.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(cc)}`);
   if (bcc) lines.push(`Bcc: ${Array.isArray(bcc) ? bcc.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(bcc)}`);
   if (replyTo) lines.push(`Reply-To: ${encodeAddressHeader(replyTo)}`);
+  if (messageId) lines.push(`Message-ID: ${messageId}`);
+  // In-Reply-To/References son lo que Gmail usa para agrupar el hilo -- el
+  // threadId de la API por si solo no basta si estos headers no coinciden.
+  if (inReplyTo) lines.push(`In-Reply-To: ${inReplyTo}`);
+  if (references) lines.push(`References: ${references}`);
+  // Cabeceras extra (p. ej. List-Unsubscribe de las campanas); sin saltos de linea para evitar inyeccion.
+  for (const [name, value] of Object.entries(headers || {})) {
+    if (/^[A-Za-z0-9-]+$/.test(name) && value) lines.push(`${name}: ${String(value).replace(/[\r\n]+/g, " ")}`);
+  }
 
   lines.push(`Subject: ${encodeHeaderValue(subject)}`);
   lines.push("MIME-Version: 1.0");
-  lines.push("Content-Type: text/html; charset=utf-8");
-  lines.push("");
-  lines.push(normalizeHumanText(html || text || ""));
+
+  const body = normalizeHumanText(html || text || "");
+
+  if (!attachments.length) {
+    lines.push("Content-Type: text/html; charset=utf-8");
+    lines.push("");
+    lines.push(body);
+  } else {
+    const boundary = `famspi_${randomUUID().replace(/-/g, "")}`;
+    lines.push(`Content-Type: multipart/mixed; boundary="${boundary}"`);
+    lines.push("");
+    lines.push(`--${boundary}`);
+    lines.push("Content-Type: text/html; charset=utf-8");
+    lines.push("");
+    lines.push(body);
+    for (const attachment of attachments) {
+      lines.push(`--${boundary}`);
+      lines.push(`Content-Type: ${attachment.contentType || "application/octet-stream"}; name="${attachment.filename}"`);
+      lines.push("Content-Transfer-Encoding: base64");
+      lines.push(`Content-Disposition: attachment; filename="${attachment.filename}"`);
+      lines.push("");
+      lines.push(wrapBase64(attachment.contentBase64));
+    }
+    lines.push(`--${boundary}--`);
+  }
 
   return Buffer.from(lines.join("\r\n"))
     .toString("base64")
@@ -229,10 +301,19 @@ async function sendViaServiceAccount({
   from,
   delegatedUser,
   threadId = null,
+  inReplyTo = null,
+  references = null,
+  attachments = [],
+  requireThreading = false,
+  headers = {},
 }) {
+  // resolveDelegatedUser cae a GOOGLE_SUBJECT (administrador) cuando el candidato
+  // es invalido -- nunca retorna falsy. Sin el guard `delegatedUser &&`, el primer
+  // eslabon (casi siempre undefined, ningun caller de compras lo pasa) ya resolvia
+  // a administrador y el "||" nunca llegaba a evaluar `from` (el remitente real).
   const delegatedFrom =
-    resolveDelegatedUser(delegatedUser) ||
-    resolveDelegatedUser(from) ||
+    (delegatedUser && resolveDelegatedUser(delegatedUser)) ||
+    (from && resolveDelegatedUser(from)) ||
     SYSTEM_MAIL_DELEGATED_USER ||
     resolveDelegatedUser(process.env.GMAIL_SERVICE_ACCOUNT_SENDER) ||
     resolveDelegatedUser(process.env.GMAIL_DELEGATED_USER) ||
@@ -243,7 +324,9 @@ async function sendViaServiceAccount({
     throw new Error("No hay remitente delegado configurado para el envío de correos");
   }
 
-  const delegatedAuth = createDelegatedJwtClient(delegatedFrom);
+  const delegatedAuth = requireThreading
+    ? createDelegatedGmailThreadClient(delegatedFrom)
+    : createDelegatedJwtClient(delegatedFrom);
   try {
     await delegatedAuth.authorize();
   } catch (err) {
@@ -267,7 +350,15 @@ async function sendViaServiceAccount({
     throw new Error(`${baseMessage}: ${err.message}`);
   }
 
-  const raw = encodeMessage({
+  const messageId = generateMessageId();
+  const delegatedGmail = google.gmail({ version: "v1", auth: delegatedAuth });
+  const previousMessageId =
+    inReplyTo || (threadId ? await getLastThreadMessageId(delegatedGmail, threadId, { required: requireThreading }) : null);
+  if (requireThreading && (!threadId || !previousMessageId)) {
+    throw threadContextError();
+  }
+  const previousReferences = references || previousMessageId || null;
+  const threadedRaw = encodeMessage({
     from: fromHeader,
     to,
     subject,
@@ -276,12 +367,15 @@ async function sendViaServiceAccount({
     cc,
     bcc,
     replyTo: replyTo || delegatedFrom,
+    messageId,
+    inReplyTo: previousMessageId || undefined,
+    references: previousReferences || undefined,
+    attachments,
+    headers,
   });
-
-  const delegatedGmail = google.gmail({ version: "v1", auth: delegatedAuth });
   let response;
   try {
-    const requestBody = { raw };
+    const requestBody = { raw: threadedRaw };
     if (threadId) {
       requestBody.threadId = threadId;
     }
@@ -312,6 +406,7 @@ async function sendViaServiceAccount({
     response,
     providerThreadId: response?.data?.threadId || null,
     providerMessageId: response?.data?.id || null,
+    rfc822MessageId: messageId,
   };
 }
 
@@ -324,6 +419,9 @@ async function sendViaSmtp({
   bcc,
   replyTo,
   from,
+  inReplyTo,
+  references,
+  attachments = [],
 }) {
   const transporter = getSmtpTransporter();
   const info = await transporter.sendMail({
@@ -335,6 +433,15 @@ async function sendViaSmtp({
     cc,
     bcc,
     replyTo,
+    attachments: attachments.map((attachment) => ({
+      filename: attachment.filename,
+      content: Buffer.from(attachment.contentBase64, "base64"),
+      contentType: attachment.contentType || undefined,
+    })),
+    headers: {
+      ...(inReplyTo ? { "In-Reply-To": inReplyTo } : {}),
+      ...(references ? { References: references } : {}),
+    },
   });
 
   logger.info("[MAILER] Email enviado por SMTP", {
@@ -350,6 +457,7 @@ async function sendViaSmtp({
     response: info,
     providerThreadId: null,
     providerMessageId: info?.messageId || null,
+    rfc822MessageId: info?.messageId || null,
   };
 }
 
@@ -394,6 +502,10 @@ async function sendMail({
   gmailUserId = null,
   source = null,
   threadId = null,
+  inReplyTo = null,
+  references = null,
+  attachments = [],
+  requireThreading = false,
 } = {}) {
   if (!to || !subject || (!html && !text)) {
     return { delivered: false, via: "none", reason: "missing_fields" };
@@ -445,6 +557,10 @@ async function sendMail({
       from: fromAddress || delegatedUser || undefined,
       delegatedUser: delegatedUser || undefined,
       threadId,
+      inReplyTo,
+      references,
+      attachments,
+      requireThreading,
     });
   } catch (serviceAccountError) {
     logger.warn(
@@ -455,6 +571,9 @@ async function sendMail({
       },
       "[MAILER] Fallo service account; intentando SMTP",
     );
+    // SMTP y Google Chat no pueden garantizar que la respuesta siga el hilo
+    // Gmail solicitado. En este caso es preferible no enviar nada.
+    if (requireThreading) throw serviceAccountError;
   }
 
   if (canUseSmtp()) {
@@ -468,6 +587,9 @@ async function sendMail({
         bcc,
         replyTo: resolvedReplyTo,
         from: fromAddress || undefined,
+        inReplyTo,
+        references,
+        attachments,
       });
     } catch (smtpError) {
       logger.error(
@@ -494,4 +616,24 @@ async function sendMail({
   });
 }
 
-module.exports = { sendMail };
+// Envio masivo (campanas CRM): SOLO service account. A diferencia de sendMail no cae a SMTP ni a
+// Google Chat (publicar un correo promocional en un chat seria una fuga); si falla, lanza el error
+// y el destinatario queda marcado como fallido. Respeta los mismos interruptores globales.
+async function sendBulkMail({ to, subject, html, text = null, headers = {} } = {}) {
+  if (!to || !subject || (!html && !text)) return { delivered: false, via: "none", reason: "missing_fields" };
+  if (!EMAIL_NOTIFICATIONS_ENABLED || MAIL_GLOBALLY_DISABLED) {
+    return { delivered: false, via: "none", reason: "disabled_globally" };
+  }
+  const fromAddress = normalizeHumanText(resolveFrom({ from: null, senderName: null }));
+  return sendViaServiceAccount({
+    to,
+    subject: normalizeHumanText(subject),
+    html: html ? normalizeHumanText(html) : html,
+    text: normalizeHumanText(text || (!html ? undefined : htmlToText(html))),
+    replyTo: normalizeHumanText(SYSTEM_MAIL_REPLY_TO || undefined),
+    from: fromAddress || undefined,
+    headers,
+  });
+}
+
+module.exports = { sendMail, sendBulkMail };

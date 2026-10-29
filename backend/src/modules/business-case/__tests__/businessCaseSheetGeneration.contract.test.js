@@ -10,12 +10,37 @@ describe("businessCaseSheetGeneration.contract", () => {
   it("validates generation payload and sets defaults", () => {
     const result = validateGenerationRequest({
       fields: { client_name: "Cliente Demo" },
-      inversiones: { Servidor: { cantidad: 1, precio: 3200 } },
+      inversiones: {
+        Servidor: {
+          cantidad: 1,
+          precio: 3200,
+          precio_operativo: 3000,
+          precio_financiero: 3200,
+          descripcion: "Servidor en rack",
+        },
+      },
     });
 
     expect(result.ok).toBe(true);
     expect(result.value.mapping_version).toBe(DEFAULT_MAPPING_VERSION);
     expect(result.value.inversiones.Servidor.cantidad).toBe(1);
+    expect(result.value.inversiones.Servidor.precio_financiero).toBe(3200);
+    expect(result.value.inversiones.Servidor.precio_operativo).toBe(3000);
+    expect(result.value.inversiones.Servidor.descripcion).toBe("Servidor en rack");
+  });
+
+  it("accepts otros_item and orden in inversiones", () => {
+    const result = validateGenerationRequest({
+      fields: { client_name: "Cliente Demo" },
+      inversiones: {
+        "otros_item:78": { otros_item: true, orden: 78, nombre: "Otros", cantidad: 2, precio: 0 },
+        USB: { otros_item: false, orden: 79, cantidad: 2, precio: 0 },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.value.inversiones["otros_item:78"].otros_item).toBe(true);
+    expect(result.value.inversiones.USB.orden).toBe(79);
   });
 
   it("rejects invalid inversiones payload", () => {
@@ -68,6 +93,9 @@ describe("businessCaseSheetGeneration.contract", () => {
           output_folder_id: payloadA.output_folder_id,
           fields: payloadA.fields,
           inversiones: payloadA.inversiones,
+          max_quantities: [],
+          equipment_tabs: [],
+          sheet_context: {},
         }),
         "utf8",
       )

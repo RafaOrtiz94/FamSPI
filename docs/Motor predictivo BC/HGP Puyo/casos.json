@@ -1,0 +1,25 @@
+[
+  {
+    "nombre": "HGP Puyo 2025",
+    "bc": "BC HOSPITAL GENERAL PUYO QUIMICA SANGUINEA E INMUNOLOGIA- MAYO 2025.xlsx",
+    "consumo": "HGP Consumibles Inmunoquimica 2025.xlsx",
+    "hojasConsumo": [
+      "c303 2025",
+      "402 2025"
+    ],
+    "determinacionesEfectivas": "2da ENTREGA INMUNOQUIMICA HGP  al 08-06-2026  - DETERMINACIONES EFECTIVAS.xlsx",
+    "nota": "Proceso terminado (plazo 6 meses). Las hojas QS 501, c303 2024 y HEMATOLOGIA son de otros procesos o equipos."
+  },
+  {
+    "nombre": "HGP Puyo 2026",
+    "bc": "BC HOSPITAL GENERAL PUYO - INMUNOQUIMICA - ENERO 2026.xlsx",
+    "consumo": "TICS HGP Consumibles Inmunoquímica 2026.xlsx",
+    "hojasConsumo": [
+      "QUIMICA",
+      "INMUNOLOGIA"
+    ],
+    "enCurso": true,
+    "historialDe": "HGP Puyo 2025",
+    "nota": "Proceso en curso (plazo 12 meses): se predice con el historial de 2025 y se verifica al cierre."
+  }
+]

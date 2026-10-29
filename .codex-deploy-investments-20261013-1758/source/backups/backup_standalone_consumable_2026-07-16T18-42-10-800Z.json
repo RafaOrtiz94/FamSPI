@@ -1,0 +1,178 @@
+{
+  "consumable_files": [
+    {
+      "id": "c785fb69-93e6-45a7-83f4-f936afdd09d1",
+      "origin_type": "standalone",
+      "purchase_type": null,
+      "equipment_purchase_request_id": null,
+      "private_purchase_request_id": null,
+      "business_case_id": null,
+      "client_id": null,
+      "process_name": "proceso X",
+      "process_code": "ALJSHDLA12361",
+      "status": "draft",
+      "registered_at": null,
+      "metadata": {},
+      "created_by": 5,
+      "created_at": "2026-07-02T21:19:03.430Z",
+      "updated_at": "2026-07-02T21:19:03.430Z"
+    },
+    {
+      "id": "207d27e7-b84e-409d-87f6-bfd70756431a",
+      "origin_type": "standalone",
+      "purchase_type": null,
+      "equipment_purchase_request_id": null,
+      "private_purchase_request_id": null,
+      "business_case_id": null,
+      "client_id": null,
+      "process_name": "Proceso de prueba",
+      "process_code": "CAD1234545",
+      "status": "draft",
+      "registered_at": null,
+      "metadata": {},
+      "created_by": 1,
+      "created_at": "2026-07-08T14:40:25.442Z",
+      "updated_at": "2026-07-08T14:42:16.167Z"
+    },
+    {
+      "id": "7c3b555f-f865-40af-b8c9-fc822744a430",
+      "origin_type": "purchase_linked",
+      "purchase_type": null,
+      "equipment_purchase_request_id": null,
+      "private_purchase_request_id": null,
+      "business_case_id": null,
+      "client_id": null,
+      "process_name": "Prueba1007",
+      "process_code": "168fc6e6-345a-4729-b82f-7a19361c1839",
+      "status": "draft",
+      "registered_at": null,
+      "metadata": {},
+      "created_by": 5,
+      "created_at": "2026-07-14T21:36:07.013Z",
+      "updated_at": "2026-07-14T21:36:07.013Z"
+    }
+  ],
+  "consumable_file_sections": [
+    {
+      "id": "1",
+      "consumable_file_id": "c785fb69-93e6-45a7-83f4-f936afdd09d1",
+      "area_code": "inmunologia",
+      "label": "Inmunologia",
+      "sort_order": 10,
+      "created_at": "2026-07-02T21:19:03.430Z",
+      "updated_at": "2026-07-02T21:19:03.430Z"
+    },
+    {
+      "id": "2",
+      "consumable_file_id": "c785fb69-93e6-45a7-83f4-f936afdd09d1",
+      "area_code": "quimica",
+      "label": "Quimica",
+      "sort_order": 20,
+      "created_at": "2026-07-02T21:19:03.430Z",
+      "updated_at": "2026-07-02T21:19:03.430Z"
+    },
+    {
+      "id": "3",
+      "consumable_file_id": "c785fb69-93e6-45a7-83f4-f936afdd09d1",
+      "area_code": "quimica_sanguinea",
+      "label": "Quimica sanguinea",
+      "sort_order": 30,
+      "created_at": "2026-07-02T21:19:03.430Z",
+      "updated_at": "2026-07-02T21:19:03.430Z"
+    },
+    {
+      "id": "4",
+      "consumable_file_id": "c785fb69-93e6-45a7-83f4-f936afdd09d1",
+      "area_code": "otros",
+      "label": "Otros",
+      "sort_order": 40,
+      "created_at": "2026-07-02T21:19:03.430Z",
+      "updated_at": "2026-07-02T21:19:03.430Z"
+    },
+    {
+      "id": "5",
+      "consumable_file_id": "207d27e7-b84e-409d-87f6-bfd70756431a",
+      "area_code": "inmunologia",
+      "label": "Inmunologia",
+      "sort_order": 10,
+      "created_at": "2026-07-08T14:40:25.442Z",
+      "updated_at": "2026-07-08T14:40:25.442Z"
+    },
+    {
+      "id": "6",
+      "consumable_file_id": "207d27e7-b84e-409d-87f6-bfd70756431a",
+      "area_code": "quimica",
+      "label": "Quimica",
+      "sort_order": 20,
+      "created_at": "2026-07-08T14:40:25.442Z",
+      "updated_at": "2026-07-08T14:40:25.442Z"
+    },
+    {
+      "id": "7",
+      "consumable_file_id": "207d27e7-b84e-409d-87f6-bfd70756431a",
+      "area_code": "quimica_sanguinea",
+      "label": "Quimica sanguinea",
+      "sort_order": 30,
+      "created_at": "2026-07-08T14:40:25.442Z",
+      "updated_at": "2026-07-08T14:40:25.442Z"
+    },
+    {
+      "id": "8",
+      "consumable_file_id": "207d27e7-b84e-409d-87f6-bfd70756431a",
+      "area_code": "otros",
+      "label": "Otros",
+      "sort_order": 40,
+      "created_at": "2026-07-08T14:40:25.442Z",
+      "updated_at": "2026-07-08T14:40:25.442Z"
+    },
+    {
+      "id": "9",
+      "consumable_file_id": "207d27e7-b84e-409d-87f6-bfd70756431a",
+      "area_code": "prueba",
+      "label": "Prueba",
+      "sort_order": 50,
+      "created_at": "2026-07-08T14:42:26.637Z",
+      "updated_at": "2026-07-08T14:42:26.637Z"
+    },
+    {
+      "id": "10",
+      "consumable_file_id": "7c3b555f-f865-40af-b8c9-fc822744a430",
+      "area_code": "inmunologia",
+      "label": "Inmunologia",
+      "sort_order": 10,
+      "created_at": "2026-07-14T21:36:07.013Z",
+      "updated_at": "2026-07-14T21:36:07.013Z"
+    },
+    {
+      "id": "11",
+      "consumable_file_id": "7c3b555f-f865-40af-b8c9-fc822744a430",
+      "area_code": "quimica",
+      "label": "Quimica",
+      "sort_order": 20,
+      "created_at": "2026-07-14T21:36:07.013Z",
+      "updated_at": "2026-07-14T21:36:07.013Z"
+    },
+    {
+      "id": "12",
+      "consumable_file_id": "7c3b555f-f865-40af-b8c9-fc822744a430",
+      "area_code": "quimica_sanguinea",
+      "label": "Quimica sanguinea",
+      "sort_order": 30,
+      "created_at": "2026-07-14T21:36:07.013Z",
+      "updated_at": "2026-07-14T21:36:07.013Z"
+    },
+    {
+      "id": "13",
+      "consumable_file_id": "7c3b555f-f865-40af-b8c9-fc822744a430",
+      "area_code": "otros",
+      "label": "Otros",
+      "sort_order": 40,
+      "created_at": "2026-07-14T21:36:07.013Z",
+      "updated_at": "2026-07-14T21:36:07.013Z"
+    }
+  ],
+  "consumable_file_lines": [],
+  "consumable_orders": [],
+  "consumable_order_lines": [],
+  "consumable_dispatch_lines": []
+}

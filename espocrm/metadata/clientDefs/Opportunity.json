@@ -1,0 +1,10 @@
+{
+  "kanbanStatusIgnoreList": [],
+  "statusField": "stage",
+  "filterList": [
+    {"name": "open"},
+    {"name": "won", "style": "success"},
+    {"name": "lost", "style": "danger"}
+  ],
+  "boolFilterList": ["onlyMy"]
+}

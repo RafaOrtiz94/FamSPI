@@ -1,6 +1,8 @@
 const db = require("../config/db");
 const logger = require("../config/logger");
 const notificationManager = require("../modules/notifications/notificationManager");
+const { isOffHours } = require("../utils/offHoursPolicy");
+const { registerOffHoursJob } = require("./offHoursCoordinator");
 
 const DEFAULT_INTERVAL_MS = Number(process.env.BC_DETERMINATIONS_GATE_EXPIRY_INTERVAL_MS || 15 * 60 * 1000);
 
@@ -110,11 +112,17 @@ async function runOnce() {
 function startBusinessCaseDeterminationsGateExpiryJob() {
   const interval = Number.isFinite(DEFAULT_INTERVAL_MS) ? DEFAULT_INTERVAL_MS : 15 * 60 * 1000;
   setInterval(() => {
+    if (isOffHours(new Date()).isOffHours) return; // manejado por offHoursCoordinator
     runOnce().catch((error) => {
       logger.error({ error: error.message }, "[BC][DETERMINATIONS_GATE] Job interval failure");
     });
   }, interval);
   logger.info({ intervalMs: interval }, "[BC][DETERMINATIONS_GATE] Expiry job iniciado");
+  registerOffHoursJob({
+    name: "bc_determinations_gate_expiry",
+    runOnce,
+    offHoursIntervalMs: interval * 6,
+  });
 }
 
 module.exports = {

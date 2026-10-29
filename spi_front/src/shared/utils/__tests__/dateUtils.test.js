@@ -60,9 +60,9 @@ describe('dateUtils', () => {
  });
 
  it('should return placeholder for invalid inputs', () => {
- expect(formatDateSafe(null)).toBe('—');
- expect(formatDateSafe(undefined)).toBe('—');
- expect(formatDateSafe('invalid')).toBe('—');
+ expect(formatDateSafe(null)).toBe('-');
+ expect(formatDateSafe(undefined)).toBe('-');
+ expect(formatDateSafe('invalid')).toBe('-');
  });
 
  it('should handle Date objects', () => {
@@ -79,8 +79,8 @@ describe('dateUtils', () => {
  });
 
  it('should return placeholder for invalid inputs', () => {
- expect(formatDateTimeSafe(null)).toBe('—');
- expect(formatDateTimeSafe('invalid')).toBe('—');
+ expect(formatDateTimeSafe(null)).toBe('-');
+ expect(formatDateTimeSafe('invalid')).toBe('-');
  });
  });
 

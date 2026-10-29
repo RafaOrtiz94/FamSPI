@@ -1,0 +1,380 @@
+[eslint] 
+src\core\api\applicantsApi.js
+  Line 30:1:  Assign object to a variable before exporting as module default  import/no-anonymous-default-export
+
+src\core\api\auditPrepApi.js
+  Line 56:1:  Assign object to a variable before exporting as module default  import/no-anonymous-default-export
+
+src\core\api\dashboardApi.js
+  Line 22:1:  Assign object to a variable before exporting as module default  import/no-anonymous-default-export
+
+src\core\api\personnelRequestsApi.js
+  Line 118:1:  Assign object to a variable before exporting as module default  import/no-anonymous-default-export
+
+src\core\api\privatePurchasesApi.js
+  Line 1587:1:  Assign object to a variable before exporting as module default  import/no-anonymous-default-export
+
+src\core\api\userCertificationsApi.js
+  Line 114:1:  Assign object to a variable before exporting as module default  import/no-anonymous-default-export
+
+src\core\auth\AuthContext.jsx
+  Line 265:5:  React Hook useEffect has missing dependencies: 'ensureActiveSession', 'forceLogoutAndRedirect', 'refresh', and 'scheduleSessionExpiry'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+src\core\auth\ProtectedRoute.jsx
+  Line 42:8:  'userScope' is assigned a value but never used  no-unused-vars
+
+src\core\ui\components\NavigationBar.jsx
+  Line 281:7:  'tiActivosFinancieroLink' is assigned a value but never used  no-unused-vars
+
+src\core\ui\widgets\AttendanceWidget.jsx
+  Line 3:44:     'FiAlertTriangle' is defined but never used                                                                       no-unused-vars
+  Line 57:7:     'LUNCH_REMINDER_MINUTES' is assigned a value but never used                                                       no-unused-vars
+  Line 58:7:     'LUNCH_SUGGESTION_AFTER_HOURS' is assigned a value but never used                                                 no-unused-vars
+  Line 59:7:     'EXIT_REMINDER_AFTER_HOURS' is assigned a value but never used                                                    no-unused-vars
+  Line 127:7:    'SECTION_PANEL_CLASS' is assigned a value but never used                                                          no-unused-vars
+  Line 128:7:    'SECTION_TITLE_CLASS' is assigned a value but never used                                                          no-unused-vars
+  Line 220:7:    'getOperationalTrackingLabel' is assigned a value but never used                                                  no-unused-vars
+  Line 440:10:   'exceptionLoading' is assigned a value but never used                                                             no-unused-vars
+  Line 449:10:   'showExceptionTools' is assigned a value but never used                                                           no-unused-vars
+  Line 452:27:   'setReminderMessage' is assigned a value but never used                                                           no-unused-vars
+  Line 494:9:    'autoOpenSessionRef' is assigned a value but never used                                                           no-unused-vars
+  Line 779:9:    'getLocation' is assigned a value but never used                                                                  no-unused-vars
+  Line 920:9:    'handleExceptionTypeChange' is assigned a value but never used                                                    no-unused-vars
+  Line 932:9:    'formatDateTime' is assigned a value but never used                                                               no-unused-vars
+  Line 1056:9:   'handleRegisterException' is assigned a value but never used                                                      no-unused-vars
+  Line 1922:9:   'handleCierreViaje' is assigned a value but never used                                                            no-unused-vars
+  Line 2055:9:   'attendanceStateLabel' is assigned a value but never used                                                         no-unused-vars
+  Line 2204:9:   'exceptionStepLabel' is assigned a value but never used                                                           no-unused-vars
+  Line 2273:6:   React Hook useMemo has a missing dependency: 'activeException'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 2289:9:   'lastRecordedEntry' is assigned a value but never used                                                            no-unused-vars
+  Line 3011:11:  'statusZoneBg' is assigned a value but never used                                                                 no-unused-vars
+
+src\core\ui\widgets\ClientRequestWidget.jsx
+  Line 3:22:  'FiFileText' is defined but never used   no-unused-vars
+  Line 3:93:  'FiRefreshCw' is defined but never used  no-unused-vars
+
+src\modules\MantenimientosPage.jsx
+  Line 11:2:  'createMantenimiento' is defined but never used  no-unused-vars
+
+src\modules\audit-prep\AuditPrepPage.jsx
+  Line 180:5:  React Hook useEffect has a missing dependency: 'loadData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\backoffice\components\ClientApprovalsWidget.jsx
+  Line 120:8:  'pendingCount' is assigned a value but never used  no-unused-vars
+
+src\modules\backoffice\pages\ClientRequestReview.jsx
+  Line 103:5:  React Hook useEffect has a missing dependency: 'refresh'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\calidad\components\CA0101AuthModal.jsx
+  Line 3:8:  'api' is defined but never used  no-unused-vars
+
+src\modules\calidad\components\CA0106Stepper.jsx
+  Line 12:10:  'currentStep' is assigned a value but never used     no-unused-vars
+  Line 12:23:  'setCurrentStep' is assigned a value but never used  no-unused-vars
+
+src\modules\calidad\components\CA0107Stepper.jsx
+  Line 13:10:  'currentStep' is assigned a value but never used     no-unused-vars
+  Line 13:23:  'setCurrentStep' is assigned a value but never used  no-unused-vars
+
+src\modules\calidad\components\CA0112Stepper.jsx
+  Line 16:9:  'getStepIndex' is assigned a value but never used  no-unused-vars
+
+src\modules\calidad\pages\CA0101Workspace.jsx
+  Line 2:10:  'Link' is defined but never used  no-unused-vars
+
+src\modules\calidad\pages\CA0105Workspace.jsx
+  Line 2:64:  'FiCheckCircle' is defined but never used  no-unused-vars
+
+src\modules\capacitaciones\components\TrainingCreateModal.jsx
+  Line 52:7:  'HOURS_OPTS' is assigned a value but never used    no-unused-vars
+  Line 53:7:  'MINUTES_OPTS' is assigned a value but never used  no-unused-vars
+
+src\modules\capacitaciones\pages\CapacitacionDetailPage.jsx
+  Line 27:3:    'FiX' is defined but never used                      no-unused-vars
+  Line 250:10:  'editingClosure' is assigned a value but never used  no-unused-vars
+
+src\modules\collab\pages\CollabDeliveriesFinancieroPage.jsx
+  Line 4:54:     'FiChevronDown' is defined but never used                                                                       no-unused-vars
+  Line 20:24:    'getCollabCollaboratorReport' is defined but never used                                                         no-unused-vars
+  Line 26:73:    'updateTiActa' is defined but never used                                                                        no-unused-vars
+  Line 29:17:    'downloadTiActa' is defined but never used                                                                      no-unused-vars
+  Line 505:10:   'recipientSource' is assigned a value but never used                                                            no-unused-vars
+  Line 2911:10:  '_buildCSV' is defined but never used                                                                           no-unused-vars
+  Line 2943:10:  '_downloadCSV' is defined but never used                                                                        no-unused-vars
+  Line 3353:7:   'TH_FLAG_LABELS' is assigned a value but never used                                                             no-unused-vars
+  Line 3415:9:   'allActas' is assigned a value but never used                                                                   no-unused-vars
+  Line 3597:29:  'tiActasSess' is assigned a value but never used                                                                no-unused-vars
+  Line 3941:6:   React Hook useCallback has a missing dependency: 'actorRole'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 3964:9:   'exportReportCSV' is assigned a value but never used                                                            no-unused-vars
+  Line 4118:27:  'itemCount' is assigned a value but never used                                                                  no-unused-vars
+
+src\modules\collab\pages\CollabDeliveriesGerenciaPage.jsx
+  Line 4:3:   'FiPackage' is defined but never used  no-unused-vars
+  Line 4:27:  'FiShield' is defined but never used   no-unused-vars
+
+src\modules\comercial\components\EquipmentPurchaseWidget.jsx
+  Line 37:2:    'VALIDATION_MESSAGES' is defined but never used           no-unused-vars
+  Line 38:2:    'MODAL_TITLES' is defined but never used                  no-unused-vars
+  Line 39:2:    'PROCESSING_STEPS' is defined but never used              no-unused-vars
+  Line 40:2:    'SUCCESS_MESSAGES' is defined but never used              no-unused-vars
+  Line 41:2:    'EMPTY_STATES' is defined but never used                  no-unused-vars
+  Line 42:2:    'LOADING_MESSAGES' is defined but never used              no-unused-vars
+  Line 43:2:    'ARIA_LABELS' is defined but never used                   no-unused-vars
+  Line 48:2:    'getEquipmentDisplayList' is defined but never used       no-unused-vars
+  Line 49:2:    'getFormattedProviderResponse' is defined but never used  no-unused-vars
+  Line 50:2:    'getPaginationInfo' is defined but never used             no-unused-vars
+  Line 51:2:    'validateForm' is defined but never used                  no-unused-vars
+  Line 52:2:    'getEquipmentPayload' is defined but never used           no-unused-vars
+  Line 212:26:  'setInspectionDraft' is assigned a value but never used   no-unused-vars
+
+src\modules\comercial\components\EquipmentSelector.jsx
+  Line 2:10:   'EQUIPMENT_TYPE_LABELS' is defined but never used  no-unused-vars
+  Line 63:10:  'id' is assigned a value but never used            no-unused-vars
+
+src\modules\comercial\components\PublicPurchaseInstallationPanel.jsx
+  Line 13:7:  'EASE_OUT' is assigned a value but never used  no-unused-vars
+
+src\modules\comercial\components\dashboard\ComercialView.jsx
+  Line 3:100:   'FiBriefcase' is defined but never used                           no-unused-vars
+  Line 3:113:   'FiUser' is defined but never used                                no-unused-vars
+  Line 18:8:    'Modal' is defined but never used                                 no-unused-vars
+  Line 19:10:   'DashboardHeader' is defined but never used                       no-unused-vars
+  Line 20:8:    'StatCard' is defined but never used                              no-unused-vars
+  Line 21:8:    'ChartCard' is defined but never used                             no-unused-vars
+  Line 22:8:    'PurchaseHandoffWidget' is defined but never used                 no-unused-vars
+  Line 23:8:    'PurchaseTypeSelector' is defined but never used                  no-unused-vars
+  Line 51:7:    'quickAccessLinks' is assigned a value but never used             no-unused-vars
+  Line 89:7:    'QuickAccessCard' is assigned a value but never used              no-unused-vars
+  Line 111:9:   'showPurchaseTypeModal' is assigned a value but never used        no-unused-vars
+  Line 112:9:   'showPurchaseHandoff' is assigned a value but never used          no-unused-vars
+  Line 112:30:  'setShowPurchaseHandoff' is assigned a value but never used       no-unused-vars
+  Line 114:8:   'handlePurchaseTypeSelection' is assigned a value but never used  no-unused-vars
+
+src\modules\comercial\components\solicitudes\ACPComercialSolicitudesView.jsx
+  Line 1:27:   'useContext' is defined but never used                    no-unused-vars
+  Line 11:10:  'useUI' is defined but never used                         no-unused-vars
+  Line 12:10:  'AuthContext' is defined but never used                   no-unused-vars
+  Line 16:9:   'showPurchaseHandoff' is assigned a value but never used  no-unused-vars
+
+src\modules\comercial\components\solicitudes\ComercialSolicitudesView.jsx
+  Line 15:8:    'RequestStatWidget' is defined but never used             no-unused-vars
+  Line 85:8:    'visibleStatWidgets' is assigned a value but never used   no-unused-vars
+  Line 91:9:    'showPurchaseHandoff' is assigned a value but never used  no-unused-vars
+  Line 104:9:   'creatingPrivate' is assigned a value but never used      no-unused-vars
+  Line 104:26:  'setCreatingPrivate' is assigned a value but never used   no-unused-vars
+  Line 247:8:   'handleViewList' is assigned a value but never used       no-unused-vars
+
+src\modules\comercial\components\workspace\CaseHeader.jsx
+  Line 103:24:  'availableTransitions' is assigned a value but never used  no-unused-vars
+
+src\modules\comercial\components\workspace\DeterminationsSection.jsx
+  Line 1013:8:  The 'getQtyInputValue' function makes the dependencies of useCallback Hook (at line 1787) change on every render. To fix this, wrap the definition of 'getQtyInputValue' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  Line 1013:8:  The 'getQtyInputValue' function makes the dependencies of useCallback Hook (at line 1824) change on every render. To fix this, wrap the definition of 'getQtyInputValue' in its own useCallback() Hook  react-hooks/exhaustive-deps
+  Line 1459:5:  React Hook useCallback has missing dependencies: 'catalogItems' and 'quantityDrafts'. Either include them or remove the dependency array                                                                react-hooks/exhaustive-deps
+  Line 1487:8:  The 'handleQtyChange' function makes the dependencies of useCallback Hook (at line 1793) change on every render. To fix this, wrap the definition of 'handleQtyChange' in its own useCallback() Hook    react-hooks/exhaustive-deps
+  Line 2533:8:  'isCustom' is assigned a value but never used                                                                                                                                                           no-unused-vars
+
+src\modules\comercial\components\workspace\InvestmentsSection.jsx
+  Line 1:8:  'React' is defined but never used  no-unused-vars
+
+src\modules\comercial\components\workspace\SectionContent.jsx
+  Line 3:8:  'Card' is defined but never used  no-unused-vars
+
+src\modules\comercial\components\workspace\SectionNavigator.jsx
+  Line 126:8:  'isReadOnly' is assigned a value but never used  no-unused-vars
+
+src\modules\comercial\components\workspace\UIGuidancePanel.jsx
+  Line 15:5:  React Hook useEffect has a missing dependency: 'loadGuidance'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\comercial\components\workspace\roleSectionConfig.js
+  Line 53:7:  'READ_ONLY_SECTIONS_BASE' is assigned a value but never used  no-unused-vars
+
+src\modules\comercial\components\workspace\sections\ClientDataSection.jsx
+  Line 182:9:  'showLocationDropdown' is assigned a value but never used  no-unused-vars
+  Line 183:9:  'filteredLocations' is assigned a value but never used     no-unused-vars
+
+src\modules\comercial\components\workspace\sections\LabSection.jsx
+  Line 57:2:   'watch' is assigned a value but never used   no-unused-vars
+  Line 58:15:  'errors' is assigned a value but never used  no-unused-vars
+
+src\modules\comercial\components\workspace\sections\RequirementsSection.jsx
+  Line 65:6:  React Hook useEffect has a missing dependency: 'showToast'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\comercial\pages\ACPEquipmentPurchases.jsx
+  Line 4:2:   'FiClipboard' is defined but never used              no-unused-vars
+  Line 8:2:   'FiAlertTriangle' is defined but never used          no-unused-vars
+  Line 18:8:  'Button' is defined but never used                   no-unused-vars
+  Line 60:8:  'heroStatusLine' is assigned a value but never used  no-unused-vars
+
+src\modules\comercial\pages\AprobacionCronogramas.jsx
+  Line 416:6:  React Hook useEffect has a missing dependency: 'sorted'. Either include it or remove the dependency array                                 react-hooks/exhaustive-deps
+  Line 488:6:  React Hook useEffect has missing dependencies: 'loadPending' and 'loadTeamSchedules'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\comercial\pages\BusinessCaseWorkspace.jsx
+  Line 24:10:  'resolveRoleSectionConfig' is defined but never used                                                                  no-unused-vars
+  Line 215:5:  React Hook useCallback has a missing dependency: 'selectedSection'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 276:5:  React Hook useCallback has a missing dependency: 'selectedSection'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\comercial\pages\Clientes.jsx
+  Line 128:12:  Unnecessary escape character: \|                              no-useless-escape
+  Line 181:9:   'usersDirectoryByEmail' is assigned a value but never used    no-unused-vars
+  Line 291:8:   'isUserPassiveOrInactive' is assigned a value but never used  no-unused-vars
+
+src\modules\comercial\pages\DeliveryCeilings.jsx
+  Line 4:3:    'FiCheckCircle' is defined but never used     no-unused-vars
+  Line 198:9:  'cfg' is assigned a value but never used      no-unused-vars
+  Line 380:9:  'ceilCfg' is assigned a value but never used  no-unused-vars
+
+src\modules\comercial\pages\OpportunityWorkspace.jsx
+  Line 5:8:  'Button' is defined but never used  no-unused-vars
+
+src\modules\comercial\pages\Solicitudes.jsx
+  Line 5:16:  'FiCheckCircle' is defined but never used    no-unused-vars
+  Line 5:31:  'FiClock' is defined but never used          no-unused-vars
+  Line 5:40:  'FiAlertTriangle' is defined but never used  no-unused-vars
+
+src\modules\crm-fam\hooks\useCrmAccounts.js
+  Line 19:6:  React Hook useCallback has a missing dependency: 'params'. Either include it or remove the dependency array. If 'setData' needs the current value of 'params', you can also switch to useReducer instead of useState and read 'params' in the reducer  react-hooks/exhaustive-deps
+  Line 19:7:  React Hook useCallback has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked                                                                                                             react-hooks/exhaustive-deps
+
+src\modules\crm-fam\hooks\useCrmContacts.js
+  Line 19:6:  React Hook useCallback has a missing dependency: 'params'. Either include it or remove the dependency array. If 'setData' needs the current value of 'params', you can also switch to useReducer instead of useState and read 'params' in the reducer  react-hooks/exhaustive-deps
+  Line 19:7:  React Hook useCallback has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked                                                                                                             react-hooks/exhaustive-deps
+
+src\modules\crm-fam\hooks\useCrmLeads.js
+  Line 19:6:  React Hook useCallback has a missing dependency: 'params'. Either include it or remove the dependency array. If 'setData' needs the current value of 'params', you can also switch to useReducer instead of useState and read 'params' in the reducer  react-hooks/exhaustive-deps
+  Line 19:7:  React Hook useCallback has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked                                                                                                             react-hooks/exhaustive-deps
+
+src\modules\crm-fam\hooks\useCrmOpportunities.js
+  Line 19:6:  React Hook useCallback has a missing dependency: 'params'. Either include it or remove the dependency array. If 'setData' needs the current value of 'params', you can also switch to useReducer instead of useState and read 'params' in the reducer  react-hooks/exhaustive-deps
+  Line 19:7:  React Hook useCallback has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked                                                                                                             react-hooks/exhaustive-deps
+
+src\modules\crm-fam\pages\AccountsPage.jsx
+  Line 2:10:  'Link' is defined but never used  no-unused-vars
+
+src\modules\gerencia\Auditoria.jsx
+  Line 14:24:  'exportAuditoriaCSV' is defined but never used                                                                     no-unused-vars
+  Line 102:5:  React Hook useEffect has a missing dependency: 'fetchAuditoria'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\kickoff\components\KickoffAwardsSection.jsx
+  Line 618:9:  The 'winner' conditional could make the dependencies of useEffect Hook (at line 629) change on every render. To fix this, wrap the initialization of 'winner' in its own useMemo() Hook  react-hooks/exhaustive-deps
+
+src\modules\kickoff\components\KickoffQuestionCard.jsx
+  Line 50:10:  'busy' is assigned a value but never used  no-unused-vars
+
+src\modules\kickoff\components\KickoffRankingPanel.jsx
+  Line 9:9:  'full' is assigned a value but never used  no-unused-vars
+
+src\modules\kickoff\components\KickoffTiebreakerPanel.jsx
+  Line 1:38:  'useRef' is defined but never used            no-unused-vars
+  Line 1:46:  'useCallback' is defined but never used       no-unused-vars
+  Line 5:7:   'POLL_MS' is assigned a value but never used  no-unused-vars
+
+src\modules\kickoff\utils\kickoffReportPdf.js
+  Line 13:10:  'formatDate' is defined but never used  no-unused-vars
+  Line 33:10:  'wrapText' is defined but never used    no-unused-vars
+
+src\modules\servicio\components\DesinfeccionStepper.jsx
+  Line 4:56:   'FiDownload' is defined but never used                       no-unused-vars
+  Line 9:8:    'FirmaDigital' is defined but never used                     no-unused-vars
+  Line 10:8:   'DocumentSigner' is defined but never used                   no-unused-vars
+  Line 11:10:  'signDocument' is defined but never used                     no-unused-vars
+  Line 11:24:  'fileToBase64' is defined but never used                     no-unused-vars
+  Line 113:8:  'handleSignatureCapture' is assigned a value but never used  no-unused-vars
+  Line 252:8:  'documentData' is assigned a value but never used            no-unused-vars
+
+src\modules\servicio\components\PendingApprovals.jsx
+  Line 280:8:  The 'documents' conditional could make the dependencies of useMemo Hook (at line 322) change on every render. Move it inside the useMemo callback. Alternatively, wrap the initialization of 'documents' in its own useMemo() Hook  react-hooks/exhaustive-deps
+  Line 281:8:  The 'files' conditional could make the dependencies of useMemo Hook (at line 322) change on every render. To fix this, wrap the initialization of 'files' in its own useMemo() Hook                                                 react-hooks/exhaustive-deps
+  Line 281:8:  The 'files' conditional could make the dependencies of useMemo Hook (at line 329) change on every render. To fix this, wrap the initialization of 'files' in its own useMemo() Hook                                                 react-hooks/exhaustive-deps
+
+src\modules\servicio\components\VerificacionStepper.jsx
+  Line 4:66:   'FiCamera' is defined but never used  no-unused-vars
+  Line 124:2:  Expected a default case               default-case
+
+src\modules\servicio\components\solicitudes\BcInspectionList.jsx
+  Line 10:3:  'FiMapPin' is defined but never used  no-unused-vars
+
+src\modules\shared\pages\LinksInteres.jsx
+  Line 9:2:  'FiFileText' is defined but never used  no-unused-vars
+
+src\modules\shared\pages\Unauthorized.jsx
+  Line 9:8:  'navigate' is assigned a value but never used  no-unused-vars
+
+src\modules\shared\purchases-workspace\components\RoleGatedAction.jsx
+  Line 1:8:  'React' is defined but never used  no-unused-vars
+
+src\modules\shared\purchases-workspace\expediente\tabs\ContractTab.jsx
+  Line 86:9:  'canAcpUploadSigned' is assigned a value but never used  no-unused-vars
+
+src\modules\shared\solicitudes\components\AprobacionPermisosView.jsx
+  Line 1441:9:  'selectedStatus' is assigned a value but never used       no-unused-vars
+  Line 1442:9:  'selectedIsRequester' is assigned a value but never used  no-unused-vars
+  Line 1446:9:  'selectedIsApprover' is assigned a value but never used   no-unused-vars
+
+src\modules\shared\solicitudes\components\PermisosColaboradoresAlbum.jsx
+  Line 2:38:   'FiUser' is defined but never used                                                                       no-unused-vars
+  Line 3:8:    'Card' is defined but never used                                                                         no-unused-vars
+  Line 74:5:   React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 110:8:  'avatarSize' is assigned a value but never used                                                          no-unused-vars
+
+src\modules\shared\solicitudes\components\PermisosGlobalRequestsWidget.jsx
+  Line 106:5:  React Hook useEffect has a missing dependency: 'load'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\shared\solicitudes\components\PermisosStatusWidget.jsx
+  Line 5:3:     'FiCheck' is defined but never used                                  no-unused-vars
+  Line 13:18:   'AnimatePresence' is defined but never used                          no-unused-vars
+  Line 219:9:   'isApprovedSolicitud' is assigned a value but never used             no-unused-vars
+  Line 446:9:   'canSelectedUserApproveRecovery' is assigned a value but never used  no-unused-vars
+  Line 453:9:   'selectedStatus' is assigned a value but never used                  no-unused-vars
+  Line 454:9:   'selectedIsApprover' is assigned a value but never used              no-unused-vars
+  Line 596:11:  'isApproverOfSolicitud' is assigned a value but never used           no-unused-vars
+
+src\modules\shared\solicitudes\hooks\useSolicitudes.js
+  Line 47:30:  React Hook useCallback has a spread element in its dependency array. This means we can't statically verify whether you've passed the correct dependencies  react-hooks/exhaustive-deps
+
+src\modules\shared\solicitudes\modals\PermisoVacacionModal.jsx
+  Line 228:5:  React Hook useEffect has a missing dependency: 'loadVacationSummary'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  Line 235:5:  React Hook useEffect has a missing dependency: 'loadVacationSummary'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\shared\solicitudes\modals\VacationRequestModal.jsx
+  Line 83:6:  React Hook useEffect has a missing dependency: 'revalidateBalance'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\shared\solicitudes\pages\PermisosPage.jsx
+  Line 121:5:  React Hook useEffect has a missing dependency: 'loadSummary'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\signature\components\DocumentSigner.jsx
+  Line 149:5:  React Hook useCallback has an unnecessary dependency: 'consentText'. Either exclude it or remove the dependency array  react-hooks/exhaustive-deps
+
+src\modules\signature\pages\DocumentVerification.jsx
+  Line 17:9:  'searchParams' is assigned a value but never used  no-unused-vars
+
+src\modules\signature\utils\signatureValidationSheetPdf.js
+  Line 43:14:  Unexpected control character(s) in regular expression: \x00  no-control-regex
+
+src\modules\talento\DashboardTI.jsx
+  Line 8:2:  'FiFileText' is defined but never used  no-unused-vars
+
+src\modules\talento\components\pipeline\stages\StageContracting.jsx
+  Line 8:47:  'DoneNotice' is defined but never used  no-unused-vars
+
+src\modules\talento\pages\TechnicalTestResponsiblePage.jsx
+  Line 69:9:  'hasResult' is assigned a value but never used  no-unused-vars
+
+src\modules\talento\schemas\commandCenterProfileSchema.js
+  Line 9:7:  'normalizeStage' is assigned a value but never used  no-unused-vars
+
+src\modules\ti\components\TiActaModals.jsx
+  Line 1:28:  'useMemo' is defined but never used  no-unused-vars
+  Line 2:27:  'FiPlus' is defined but never used   no-unused-vars
+  Line 2:58:  'FiX' is defined but never used      no-unused-vars
+
+src\modules\ti\pages\TIDeviceManagementPage.jsx
+  Line 44:3:    'downloadTiActa' is defined but never used              no-unused-vars
+  Line 45:3:    'getTiActa' is defined but never used                   no-unused-vars
+  Line 459:10:  'coordinationDates' is assigned a value but never used  no-unused-vars
+
+src\routes\AppRoutes.jsx
+  Line 82:7:  'ServicioRetiroEquipos' is assigned a value but never used  no-unused-vars
+
+Search for the keywords to learn more about each warning.

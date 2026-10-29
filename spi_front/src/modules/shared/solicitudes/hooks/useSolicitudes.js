@@ -44,6 +44,7 @@ export const useSolicitudes = (config) => {
  } finally {
  setLoading(false);
  }
+ // eslint-disable-next-line react-hooks/exhaustive-deps
  }, [filters, fetchFunction, ...dependencyValues]);
 
  useEffect(() => {

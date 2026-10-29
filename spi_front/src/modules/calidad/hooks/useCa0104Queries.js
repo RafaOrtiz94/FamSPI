@@ -20,7 +20,7 @@ export const useGetTrapsMaps = ({ riskLevel, status } = {}) =>
       });
       return data.data;
     },
-    refetchInterval: 60000,
+    refetchInterval: 600000, // >5min: deja hueco para que Neon autosuspenda entre polls
   });
 
 export const useGetInspections = ({ trapsMapId, status } = {}) =>
@@ -32,7 +32,7 @@ export const useGetInspections = ({ trapsMapId, status } = {}) =>
       });
       return data.data;
     },
-    refetchInterval: 60000,
+    refetchInterval: 600000, // >5min: deja hueco para que Neon autosuspenda entre polls
   });
 
 export const useGetVendorApis = ({ status } = {}) =>
@@ -44,7 +44,7 @@ export const useGetVendorApis = ({ status } = {}) =>
       });
       return data.data;
     },
-    refetchInterval: 60000,
+    refetchInterval: 600000, // >5min: deja hueco para que Neon autosuspenda entre polls
   });
 
 export const useGetToxicity = ({ inspectionId, status } = {}) =>
@@ -56,7 +56,7 @@ export const useGetToxicity = ({ inspectionId, status } = {}) =>
       });
       return data.data;
     },
-    refetchInterval: 60000,
+    refetchInterval: 600000, // >5min: deja hueco para que Neon autosuspenda entre polls
   });
 
 export const useTransitionPestControlRecord = () => {

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f172a" />
+    <title>SPI FAM | Sin conexion</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f8fafc;
+        --card: rgba(255, 255, 255, 0.92);
+        --text: #0f172a;
+        --muted: #475569;
+        --accent: #0f766e;
+        --border: rgba(15, 23, 42, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top, rgba(20, 184, 166, 0.16), transparent 32%),
+          linear-gradient(180deg, #eff6ff 0%, var(--bg) 45%, #e2e8f0 100%);
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+
+      main {
+        width: min(100%, 560px);
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 24px;
+        padding: 28px;
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+        backdrop-filter: blur(10px);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(15, 118, 110, 0.12);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 16px 0 10px;
+        font-size: clamp(28px, 5vw, 36px);
+        line-height: 1.05;
+      }
+
+      p {
+        margin: 0 0 14px;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      ul {
+        margin: 18px 0 0;
+        padding-left: 18px;
+        color: var(--muted);
+      }
+
+      li + li {
+        margin-top: 10px;
+      }
+
+      .actions {
+        margin-top: 22px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 0 16px;
+        border-radius: 12px;
+        border: 1px solid transparent;
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      .button-primary {
+        background: #0f172a;
+        color: #ffffff;
+      }
+
+      .button-secondary {
+        border-color: rgba(15, 23, 42, 0.12);
+        background: #ffffff;
+        color: var(--text);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="eyebrow">Modo offline</span>
+      <h1>FamSPI no puede conectarse en este momento.</h1>
+      <p>
+        La aplicacion mantiene lo que ya estaba cargado y volvera a sincronizar cuando regrese la red.
+        Esta pantalla aparece cuando todavia no existe una copia usable del shell o la conexion fallo por completo.
+      </p>
+      <div class="actions">
+        <a class="button button-primary" href="/">Reintentar</a>
+        <a class="button button-secondary" href="/dashboard/mi-perfil">Abrir perfil</a>
+      </div>
+      <ul>
+        <li>Las consultas y formularios nuevos pueden requerir internet.</li>
+        <li>Las acciones sensibles siguen enviandose directo al backend cuando la red esta disponible.</li>
+        <li>Instalar la PWA mejora el arranque y la continuidad en conexiones inestables.</li>
+      </ul>
+    </main>
+  </body>
+</html>

@@ -62,6 +62,7 @@ const ClientRequestManagement = () => {
 
  useEffect(() => {
  const interval = setInterval(() => {
+ if (document.hidden) return;
  loadRequests(true);
  }, 12000);
 

@@ -1,0 +1,68 @@
+/*
+  Sistema visual del módulo Servicio Técnico ("st-scope").
+  Corrección (2026-08-12): los colores y la tipografía deben ser
+  exactamente los de DESIGN.md (paleta Naval Slate + Geist) — no una
+  paleta nueva. Lo que sí es propio de este módulo es la CONSOLIDACIÓN de
+  componentes (ServicioWorkspaceShell, ServicioBadge, etc.) que antes
+  estaban duplicados/copiados por página; el lenguaje visual en sí es el
+  mismo del resto del dashboard, como pide DESIGN.md §15 ("Don't hacer que
+  módulos distintos parezcan construidos por equipos distintos").
+*/
+
+.st-scope {
+  --st-font-display: "Geist", system-ui, -apple-system, sans-serif;
+  --st-font-body: "Geist", system-ui, -apple-system, sans-serif;
+  /* DESIGN.md §3, "The Geist Mono Rule": IDs, montos y fechas exactas van en
+     mono -- marca que ese dato es preciso y copiable, no decoracion. La clase
+     global .font-mono-data (src/index.css) ya carga Geist Mono; este token
+     existe solo para el caso en que un componente necesite el valor crudo. */
+  --st-font-mono: "Geist Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  /* Action Blue — el único color de acción de todo el sistema (DESIGN.md §2) */
+  --st-accent: #2563eb;
+  --st-accent-strong: #1d4ed8;
+  --st-accent-soft: #dbeafe;
+  --st-accent-soft-text: #1d4ed8;
+
+  /* Neutrales Naval Slate */
+  --st-bg: #f9fafb; /* paper-white */
+  --st-surface: #ffffff; /* surface-white */
+  --st-surface-sunken: #f3f4f6; /* badge-neutral / ghost hover */
+  --st-border: #e5e7eb; /* soft-border */
+  --st-fog: #d1d5db; /* Fog (DESIGN.md §2) — borde de card interactiva en hover, nunca Action Blue */
+  --st-text: #1f2937; /* ink-slate */
+  --st-text-muted: #6b7280; /* warm-ash */
+  --st-text-faint: #9ca3af;
+
+  /* Semántico (DESIGN.md §2 — "solo semántico, nunca decorativo") */
+  --st-success: #16a34a;
+  --st-success-soft: #dcfce7;
+  --st-warning: #d97706;
+  --st-warning-soft: #fef3c7;
+  --st-danger: #dc2626;
+  --st-danger-soft: #fee2e2;
+  --st-info: #0ea5e9;
+  --st-info-soft: #dbeafe;
+
+  /* Radios (DESIGN.md §1: "Radio de 16px como firma constante") */
+  --st-radius-lg: 16px;
+  --st-radius-md: 12px;
+  --st-radius-sm: 8px;
+  --st-radius-pill: 9999px;
+
+  /* Sombras (DESIGN.md §4 — vocabulario fijo, nunca inventar valores) */
+  --st-shadow-card: 0 2px 10px rgba(0, 0, 0, 0.06); /* Ambient */
+  --st-shadow-raised: 0 4px 16px rgba(0, 0, 0, 0.1); /* Lifted */
+
+  font-family: var(--st-font-body);
+  color: var(--st-text);
+  background: var(--st-bg);
+}
+
+.st-scope h1,
+.st-scope h2,
+.st-scope h3,
+.st-scope h4 {
+  font-family: var(--st-font-display);
+  letter-spacing: -0.01em;
+}

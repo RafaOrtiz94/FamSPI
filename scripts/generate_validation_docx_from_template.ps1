@@ -63,6 +63,18 @@ try {
     $doc = Invoke-ValidationRetry -Logger $logger -Description 'Creacion de documento desde plantilla' -Action { $word.Documents.Add($template) }
 
     Show-ValidationProgress -Id $progressId -Activity 'Generando documento Word' -Status 'Poblando metadatos' -PercentComplete 30
+
+    $requiredTags = @('doc_title','doc_area','meta_system','meta_code','meta_version','meta_date','meta_status','body_content')
+    $missingTags = @()
+    foreach ($tag in $requiredTags) {
+      $found = $false
+      foreach ($ctrl in $doc.ContentControls) { if ($ctrl.Tag -eq $tag) { $found = $true; break } }
+      if (-not $found) { $missingTags += $tag }
+    }
+    if ($missingTags.Count -gt 0) {
+      throw "La plantilla '$template' no contiene los content controls requeridos: $($missingTags -join ', '). Verifique que la plantilla .dotx tenga controles con los tags correctos."
+    }
+
     (Get-ControlByTag -Document $doc -Tag 'doc_title').Range.Text = $DocumentTitle
     (Get-ControlByTag -Document $doc -Tag 'doc_area').Range.Text = $Area
     (Get-ControlByTag -Document $doc -Tag 'meta_system').Range.Text = $SystemName
@@ -90,6 +102,9 @@ try {
       foreach ($toc in $doc.TablesOfContents) {
         Invoke-ValidationRetry -Logger $logger -Description 'Actualizacion de TOC' -Action { $toc.Update() | Out-Null }
       }
+      try {
+        $word.ActiveWindow.View.ShowFieldCodes = $false
+      } catch {}
       foreach ($table in $doc.Tables) {
         try { $table.AutoFitBehavior(1) | Out-Null } catch {}
       }

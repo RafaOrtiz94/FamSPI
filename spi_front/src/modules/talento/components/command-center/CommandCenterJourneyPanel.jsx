@@ -1,142 +1,130 @@
 import React from "react";
-import clsx from "clsx";
+import { FiCheck, FiAlertTriangle, FiClock, FiCircle, FiAlertCircle } from "react-icons/fi";
 
-const statusStyles = {
-  complete: {
-    border: "border-emerald-200",
-    bg: "bg-emerald-50",
-    text: "text-emerald-700",
-    dot: "border-emerald-300 bg-emerald-100 text-emerald-600",
-  },
-  current: {
-    border: "border-sky-200",
-    bg: "bg-sky-50",
-    text: "text-sky-700",
-    dot: "border-sky-300 bg-sky-100 text-sky-600",
-  },
-  warning: {
-    border: "border-amber-200",
-    bg: "bg-amber-50",
-    text: "text-amber-700",
-    dot: "border-amber-300 bg-amber-100 text-amber-600",
-  },
-  stalled: {
-    border: "border-rose-200",
-    bg: "bg-rose-50",
-    text: "text-rose-700",
-    dot: "border-rose-300 bg-rose-100 text-rose-600",
-  },
-  pending: {
-    border: "border-slate-200",
-    bg: "bg-white",
-    text: "text-slate-700",
-    dot: "border-slate-300 bg-slate-100 text-slate-500",
-  },
+// Design system tokens (DESIGN.md)
+const D = {
+  naval:   '#1E293B',
+  ink:     '#1F2937',
+  ash:     '#6B7280',
+  fog:     '#D1D5DB',
+  border:  '#E5E7EB',
+  surface: '#FFFFFF',
+  page:    '#F9FAFB',
+  action:  '#2563EB',
+  green:   '#16A34A',
+  greenSoft: '#DCFCE7',
+  amber:   '#D97706',
+  amberSoft: '#FEF3C7',
+  red:     '#DC2626',
+  redSoft: '#FEE2E2',
 };
 
-const statusLabels = {
-  complete: "Completado",
-  current: "En curso",
-  warning: "Alerta",
-  stalled: "Estancada",
-  pending: "Pendiente",
+const STATUS = {
+  complete: { icon: FiCheck,         color: D.green,  bg: D.greenSoft, border: '#BBF7D0', label: 'Completado' },
+  current:  { icon: FiClock,         color: D.action, bg: '#EFF6FF',   border: '#BFDBFE', label: 'En curso'   },
+  warning:  { icon: FiAlertTriangle, color: D.amber,  bg: D.amberSoft, border: '#FDE68A', label: 'Alerta'     },
+  stalled:  { icon: FiAlertCircle,   color: D.red,    bg: D.redSoft,   border: '#FECACA', label: 'Estancada'  },
+  pending:  { icon: FiCircle,        color: D.fog,    bg: D.page,      border: D.border,  label: 'Pendiente'  },
 };
 
-const clampPercent = (value) => Math.max(0, Math.min(100, value ?? 0));
+const clamp = (v) => Math.max(0, Math.min(100, v ?? 0));
 
-const CommandCenterJourneyPanel = ({
-  title,
-  description,
-  progress = {},
-  steps = [],
-  aside,
-}) => {
-  const percent =
-    typeof progress?.percent === "number"
-      ? clampPercent(progress.percent)
-      : progress?.total > 0
-      ? clampPercent(((progress.done ?? 0) / progress.total) * 100)
+const CommandCenterJourneyPanel = ({ title, description, progress = {}, steps = [], aside }) => {
+  const percent = typeof progress?.percent === 'number'
+    ? clamp(progress.percent)
+    : progress?.total > 0
+      ? clamp(((progress.done ?? 0) / progress.total) * 100)
       : 0;
-  const roundedPercent = Math.round(percent);
 
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white/80 p-6 shadow-sm shadow-slate-900/5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-        <div className="flex-1 space-y-2">
-          {title && (
-            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-slate-500">
-              {title}
-            </p>
+    <div className="rounded-2xl border" style={{ borderColor: D.border, background: D.surface, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+      {/* Header */}
+      <div className="px-5 py-4 border-b" style={{ borderColor: D.border }}>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            {title && (
+              <p className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: D.ash }}>
+                {title}
+              </p>
+            )}
+            {description && (
+              <p className="text-sm" style={{ color: D.ink }}>{description}</p>
+            )}
+          </div>
+          {aside && (
+            <div className="lg:w-72 flex-shrink-0 rounded-xl border p-3 text-sm" style={{ borderColor: D.border, background: D.page, color: D.ink }}>
+              {aside}
+            </div>
           )}
-          {description && <p className="text-lg font-semibold text-slate-900">{description}</p>}
         </div>
-        {aside && (
-          <div className="w-full max-w-sm rounded-2xl border border-slate-100 bg-slate-50/70 p-4 text-sm text-slate-600 shadow-inner lg:ml-6">
-            {aside}
-          </div>
-        )}
-      </div>
 
-      <div className="mt-6 space-y-3">
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.3em] text-slate-500">
-            <span>Progreso</span>
-            <span>{roundedPercent}%</span>
+        {/* Progress bar — solid Action Blue, no gradient */}
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: D.ash }}>
+              Progreso
+            </span>
+            <span className="text-[11px] font-mono font-semibold" style={{ color: D.ink }}>
+              {Math.round(percent)}% · {progress.done ?? 0}/{progress.total ?? 0}
+            </span>
           </div>
-          <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
+          <div className="h-1.5 w-full overflow-hidden rounded-full" style={{ background: D.border }}>
             <div
-              className="h-full rounded-full bg-gradient-to-r from-sky-500 via-slate-900 to-emerald-500 transition-all duration-300"
-              style={{ width: `${percent}%` }}
+              className="h-full rounded-full transition-all duration-300"
+              style={{ width: `${percent}%`, background: D.action }}
             />
           </div>
-          <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-500">
-            <span>{progress.done ?? 0} completados</span>
-            <span>{progress.total ?? 0} pasos</span>
-          </div>
         </div>
+      </div>
 
-        <div className="space-y-3">
+      {/* Steps */}
+      {steps.length > 0 && (
+        <div className="divide-y" style={{ borderColor: D.border }}>
           {steps.map((step) => {
-            const status = statusStyles[step.status] || statusStyles.pending;
-            const label = step.label || "Sin titulo";
+            const s = STATUS[step.status] || STATUS.pending;
+            const Icon = s.icon;
             return (
               <div
-                key={step.key || label}
-                className={clsx(
-                  "flex flex-col gap-3 rounded-2xl border p-4 shadow-sm sm:flex-row sm:items-center",
-                  status.border,
-                  status.bg
-                )}
+                key={step.key || step.label}
+                className="flex items-center gap-3 px-5 py-3"
+                style={{ background: step.status === 'current' ? '#EFF6FF' : D.surface }}
               >
-                <div className="flex items-center gap-4">
-                  <div
-                    className={clsx(
-                      "flex h-10 w-10 items-center justify-center rounded-2xl border-2 font-semibold",
-                      status.dot
-                    )}
-                  >
-                    {step.status === "complete"
-                      ? "C"
-                      : step.status === "current"
-                        ? "O"
-                        : step.status === "warning" || step.status === "stalled"
-                        ? "!"
-                        : step.key || "o"}
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <p className={clsx("text-sm font-semibold", status.text)}>{label}</p>
-                    {step.detail && <p className="text-sm text-slate-500">{step.detail}</p>}
-                  </div>
+                {/* Status icon */}
+                <div
+                  className="flex-shrink-0 flex h-7 w-7 items-center justify-center rounded-full"
+                  style={{ background: s.bg, border: `1.5px solid ${s.border}` }}
+                >
+                  <Icon size={13} style={{ color: s.color }} />
                 </div>
-                <div className="flex flex-1 flex-col items-end justify-between gap-2 sm:flex-row sm:items-center sm:justify-end">
-                  <span className={clsx("text-xs font-semibold uppercase tracking-[0.3em]", status.text)}>
-                    {statusLabels[step.status] || step.status}
+
+                {/* Label + detail */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate" style={{ color: D.ink }}>
+                    {step.label}
+                  </p>
+                  {step.detail && (
+                    <p className="text-xs truncate mt-0.5" style={{ color: D.ash }}>
+                      {step.detail}
+                    </p>
+                  )}
+                </div>
+
+                {/* Status label + action */}
+                <div className="flex-shrink-0 flex items-center gap-2">
+                  <span
+                    className="hidden sm:block text-[10px] font-semibold uppercase tracking-widest"
+                    style={{ color: s.color }}
+                  >
+                    {s.label}
                   </span>
                   {step.actionLabel && step.onAction && (
                     <button
                       type="button"
                       onClick={step.onAction}
-                      className="rounded-full border border-slate-200 bg-white px-4 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+                      className="rounded-full border px-3 py-1 text-xs font-semibold transition-colors cursor-pointer"
+                      style={{ borderColor: D.border, color: D.ink, background: D.surface }}
+                      onMouseEnter={e => { e.currentTarget.style.background = D.page; e.currentTarget.style.borderColor = '#9CA3AF'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = D.surface; e.currentTarget.style.borderColor = D.border; }}
                     >
                       {step.actionLabel}
                     </button>
@@ -146,7 +134,7 @@ const CommandCenterJourneyPanel = ({
             );
           })}
         </div>
-      </div>
+      )}
     </div>
   );
 };

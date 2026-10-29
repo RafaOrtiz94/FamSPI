@@ -64,6 +64,82 @@ async function createAllDayEvent({
   }
 }
 
+async function createOrUpdateSharedAllDayEvent({
+  eventId = null,
+  summary,
+  description,
+  date,
+  reminderMinutesBefore = 1440,
+  attendees = [],
+  sendUpdates = "all",
+}) {
+  if (!date) throw new Error("Se requiere una fecha para crear o actualizar el evento en Calendar");
+  const eventDate = new Date(date);
+  const startDate = eventDate.toISOString().split("T")[0];
+  const endDate = new Date(eventDate.getTime() + 24 * 60 * 60 * 1000)
+    .toISOString()
+    .split("T")[0];
+
+  const requestBody = {
+    summary,
+    description,
+    start: { date: startDate, timeZone: DEFAULT_TIMEZONE },
+    end: { date: endDate, timeZone: DEFAULT_TIMEZONE },
+    reminders: {
+      useDefault: false,
+      overrides: reminderMinutesBefore
+        ? [{ method: "email", minutes: reminderMinutesBefore }]
+        : [],
+    },
+  };
+
+  if (attendees?.length) {
+    requestBody.attendees = attendees.map((email) => ({ email }));
+  }
+
+  try {
+    let data;
+    if (eventId) {
+      try {
+        ({ data } = await calendar.events.update({
+          calendarId: DEFAULT_CALENDAR_ID,
+          eventId,
+          requestBody,
+          sendUpdates,
+        }));
+        logger.info({ eventId, summary, date: startDate }, "[CALENDAR] Evento all-day actualizado");
+      } catch (updateError) {
+        logger.warn(
+          { err: updateError, eventId, summary },
+          "[CALENDAR] No se pudo actualizar evento all-day existente. Se recreará.",
+        );
+        ({ data } = await calendar.events.insert({
+          calendarId: DEFAULT_CALENDAR_ID,
+          requestBody,
+          sendUpdates,
+        }));
+        logger.info({ eventId: data.id, summary, date: startDate }, "[CALENDAR] Evento all-day recreado");
+      }
+    } else {
+      ({ data } = await calendar.events.insert({
+        calendarId: DEFAULT_CALENDAR_ID,
+        requestBody,
+        sendUpdates,
+      }));
+      logger.info({ eventId: data.id, summary, date: startDate }, "[CALENDAR] Evento all-day creado");
+    }
+
+    return {
+      id: data.id,
+      htmlLink: data.htmlLink,
+      calendarId: DEFAULT_CALENDAR_ID,
+    };
+  } catch (error) {
+    logger.error({ err: error, eventId, summary }, "Error creando o actualizando evento all-day en Calendar");
+    throw error;
+  }
+}
+
 function buildTimeOffEventPayload({
   summary,
   description,
@@ -190,7 +266,43 @@ async function createTimeOffEvent({
   };
 }
 
+async function cancelTimeOffEvent({ eventId, calendarId, userEmail }) {
+  if (!eventId) return;
+
+  if (userEmail) {
+    try {
+      const delegatedUser = resolveDelegatedUser(userEmail);
+      if (delegatedUser) {
+        const delegatedAuth = createDelegatedJwtClient(delegatedUser);
+        await delegatedAuth.authorize();
+        const delegatedCalendar = google.calendar({ version: "v3", auth: delegatedAuth });
+        await delegatedCalendar.events.delete({
+          calendarId: "primary",
+          eventId,
+          sendUpdates: "all",
+        });
+        logger.info({ eventId, userEmail }, "[CALENDAR] Evento de tiempo fuera eliminado del calendario del usuario");
+        return;
+      }
+    } catch (primaryError) {
+      logger.warn(
+        { err: primaryError, eventId, userEmail },
+        "[CALENDAR] No se pudo eliminar del calendario primario; intentando calendario compartido"
+      );
+    }
+  }
+
+  await calendar.events.delete({
+    calendarId: calendarId || DEFAULT_CALENDAR_ID,
+    eventId,
+    sendUpdates: "all",
+  });
+  logger.info({ eventId, calendarId }, "[CALENDAR] Evento de tiempo fuera eliminado del calendario compartido");
+}
+
 module.exports = {
   createAllDayEvent,
+  createOrUpdateSharedAllDayEvent,
   createTimeOffEvent,
+  cancelTimeOffEvent,
 };

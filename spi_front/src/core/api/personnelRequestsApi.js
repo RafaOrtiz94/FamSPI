@@ -115,7 +115,7 @@ export const hirePersonnelRequest = async (id) => {
  return response.data;
 };
 
-export default {
+const personnelRequestsApi = {
  createPersonnelRequest,
  getPersonnelRequests,
  getPersonnelRequestById,
@@ -129,11 +129,21 @@ export default {
  uploadPersonnelRequestDocument,
  hirePersonnelRequest,
 };
+
+export default personnelRequestsApi;
 /**
  * Vincular colaborador a solicitud de personal
  */
 export const linkPersonnelRequestCollaborator = async (id, collaborator_user_id) => {
  const response = await api.patch(`/personnel-requests/${id}/collaborator`, { collaborator_user_id });
+ return response.data;
+};
+
+/**
+ * Reasignar solicitante/jefe de area de una solicitud de personal
+ */
+export const linkPersonnelRequestRequester = async (id, requester_id) => {
+ const response = await api.patch(`/personnel-requests/${id}/requester`, { requester_id });
  return response.data;
 };
 

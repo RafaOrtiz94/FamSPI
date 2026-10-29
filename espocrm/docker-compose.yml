@@ -1,0 +1,26 @@
+services:
+  espocrm:
+    image: espocrm/espocrm:latest
+    container_name: fam_espocrm
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    environment:
+      ESPOCRM_DATABASE_DRIVER: pdo_mysql
+      ESPOCRM_DATABASE_HOST: ${ESPOCRM_DATABASE_HOST}
+      ESPOCRM_DATABASE_PORT: ${ESPOCRM_DATABASE_PORT}
+      ESPOCRM_DATABASE_NAME: ${ESPOCRM_DATABASE_NAME}
+      ESPOCRM_DATABASE_USER: ${ESPOCRM_DATABASE_USER}
+      ESPOCRM_DATABASE_PASSWORD: ${ESPOCRM_DATABASE_PASSWORD}
+      ESPOCRM_ADMIN_USERNAME: ${ESPOCRM_ADMIN_USERNAME}
+      ESPOCRM_ADMIN_PASSWORD: ${ESPOCRM_ADMIN_PASSWORD}
+      ESPOCRM_SITE_URL: ${ESPOCRM_SITE_URL}
+    volumes:
+      - espocrm_data:/var/www/html/data
+      - espocrm_custom:/var/www/html/custom
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  espocrm_data:
+  espocrm_custom:

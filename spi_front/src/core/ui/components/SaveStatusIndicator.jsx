@@ -50,7 +50,7 @@ const SaveStatusIndicator = ({ status = "saved", lastSaved = null }) => {
  };
 
  return (
- <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg ${config.bgColor}`}>
+ <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl ${config.bgColor}`}>
  <Icon
  size={14}
  className={`${config.iconColor} ${config.animate ? "animate-pulse" : ""}`}

@@ -2232,6 +2232,7 @@ async function applyGoAppFollowUp({
 }
 
 module.exports = {
+  buildCaseCode,
   PROVIDERS,
   GOAPP_MILESTONES,
   ensureSchema,
